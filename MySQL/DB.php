@@ -34,20 +34,58 @@ class DB {
     private $links;
 
     /**
+     * Master Switch
      *
      * @var boolean
      */
     private $master = false;
 
-    private function __construct() {}
+    /**
+     *
+     * @var string
+     */
+    private $dsn;
 
     /**
      *
+     * @var array
+     */
+    private $dsn_slaves;
+
+    /**
+     *
+     * @var Memcached
+     */
+    private static $objMemcached;
+
+    /**
+     *
+     * @param integer $shard_key, optional
+     */
+    private function __construct($shard_key = null) {
+        if (!isset($shard_key)) {
+            $this->dsn = self::getConfig('global.master');
+        }
+
+        // sharding
+        if (is_int($shard_key)) {
+            throw new Exception();
+        }
+
+        if (!isset(self::$objMemcached)) {
+            self::$objMemcached = new Memcached();
+            self::$objMemcached->addServer(self::getConfig('core.memcache_host'), self::getConfig('core.memcache_port'));
+        }
+    }
+
+    /**
+     *
+     * @param integer $shard_key, optional
      * @return DB
      */
-    public static function getInstance() {
+    public static function getInstance($shard_key = null) {
         if (!isset(self::$instance)) {
-            self::$instance = new self();
+            self::$instance = new self($shard_key);
         }
         return self::$instance;
     }
@@ -95,36 +133,59 @@ class DB {
     /**
      *
      * @param string $sql, optinal
+     * @throws Exception, if we cannot connect to db
      * @return void
      */
     private function xconnect($sql) {
-        if (!isset($sql)) {
-        }
-        if (self::isReadSql($sql) || !$this->master) {
+        $dsn = $this->dsn;
 
-        } else {
-
+        if (self::isReadSql($sql) && !$this->master) {
+            $dsn_slaves = self::getConfig('global.slaves');
+            if (isset($dsn_slaves)) {
+                $dsn = $dsn_slaves[array_rand($dsn_slaves)];
+            }
         }
+
+        $link = $this->_xconnect($dsn);
+        if ($link === false) {
+            throw new Exception();
+        }
+
+        $this->link = $link;
     }
 
     /**
      *
-     * @param string $host
-     * @param string $username
-     * @param string $passwd
-     * @param string $dbname
+     * @param string $dsn
+     * @return mysqli, false on failure
      */
-    private function _xconnect($host, $username, $passwd, $dbname) {
-        if (isset($this->links[$host])) {
-            return $this->links[$host];
+    private function _xconnect($dsn) {
+        $infos = parse_url($dsn);
+        if ($infos === false) {
+            throw new Exception();
+        }
+
+        $host = $infos['host'];
+        $port = isset($infos['port']) ? $infos['port'] : 3306;
+        $username = $infos['user'];
+        $passwd = $infos['pass'];
+        $dbname = substr($infos['path'], 1);
+        $mysql_unique_id = $host . $port;
+
+        if (isset($this->links[$mysql_unique_id])) {
+            return $this->links[$mysql_unique_id];
         }
 
         $link = new mysqli();
-        if (!$link->real_connect($host, $username, $passwd, $dbname, null, null, MYSQLI_CLIENT_COMPRESS)) { // TODO 错误处理
+        if (!$link->real_connect($host, $username, $passwd, $dbname, $port, null, MYSQLI_CLIENT_COMPRESS)) {
+            return false;
         }
 
-        if (!$link->set_charset(self::getConfig('mysql.charset', 'UTF-8'))) { // TODO 错误处理
+        if (!$link->set_charset(self::getConfig('core.charset', 'utf8'))) { // TODO 错误处理
+            return false;
         }
+
+        $this->links[$mysql_unique_id] = $link;
 
         return $link;
     }
@@ -135,13 +196,8 @@ class DB {
      * @return mysqli_result or true, false on failure
      */
     public function query($sql) {
-        while (true) {
-            $this->xconnect($sql);
-
-            if ($sql) {
-
-            }
-        }
+        $this->xconnect($sql);
+        return $this->link->query($sql);
     }
 
     /**
@@ -156,7 +212,22 @@ class DB {
             return sprintf('%F', $value);
         } else if (is_string($value)) {
             return "'" . $this->escape($value) . "'";
+        } else {
+            throw new Exception();
         }
+    }
+
+    /**
+     *
+     * @param boolean $master
+     * @return
+     */
+    public function setMaster($master) {
+        if (!is_bool($master)) {
+            throw new Exception();
+        }
+
+        $this->master = $master;
     }
 
     /**

@@ -1,4 +1,6 @@
+Sample code.
 
 Dependencies
     * PHP: 5.3.x
-        
+    * PHP Extensions:
+    	- Memcached
