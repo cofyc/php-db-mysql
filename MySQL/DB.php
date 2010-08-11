@@ -14,6 +14,12 @@ class DB {
     private static $instance;
 
     /**
+     *
+     * @var array
+     */
+    private static $config;
+
+    /**
      * Currently selected
      *
      * @var mysqli
@@ -48,14 +54,56 @@ class DB {
 
     /**
      *
+     * @param string $config_file
+     */
+    public static function loadConfigFromFile($config_file) {
+        $config = @parse_ini_file($config_file, true);
+        if ($config === false) {
+            throw new Exception();
+        }
+        foreach ($config as $key => $val) {
+            // sections starting with 'shard' all are shard slots
+            if (strpos($key, 'shard') === 0) {
+                self::$config['shards'][] = $val;
+            } else {
+                self::$config[$key] = $val;
+            }
+        }
+    }
+
+    /**
+     *
+     * @param string $configname
+     * @param string | null $default, optional, defaults to null
+     */
+    private static function getConfig($configname, $default = NULL) {
+        if (!is_string($configname)) {
+            throw new Exception();
+        }
+        $sections = explode('.', $configname);
+        $config = self::$config;
+        while ($section = array_shift($sections)) {
+            if (isset($config[$section])) {
+                $config = $config[$section];
+            } else {
+                return $default;
+            }
+        }
+        return $config;
+    }
+
+    /**
+     *
      * @param string $sql, optinal
      * @return void
      */
-    private function xconnect($sql = null) {
-        if (isset($sql)) {
-            if (self::isReadSql($sql) || !$this->master) {
+    private function xconnect($sql) {
+        if (!isset($sql)) {
+        }
+        if (self::isReadSql($sql) || !$this->master) {
 
-            }
+        } else {
+
         }
     }
 
@@ -67,19 +115,16 @@ class DB {
      * @param string $dbname
      */
     private function _xconnect($host, $username, $passwd, $dbname) {
-    	if (isset($this->links[$host])) {
-    		return $this->links[$host];
-    	}
+        if (isset($this->links[$host])) {
+            return $this->links[$host];
+        }
 
-    	$link = new mysqli();
-    	if (!$link->real_connect($host, $username, $passwd, $dbname, null, null, MYSQLI_CLIENT_COMPRESS)) {
-    		// TODO 错误处理
-    	}
+        $link = new mysqli();
+        if (!$link->real_connect($host, $username, $passwd, $dbname, null, null, MYSQLI_CLIENT_COMPRESS)) { // TODO 错误处理
+        }
 
-    	if (!$link->set_charset('UTF-8')) {
-    		// TODO 错误处理
-    	}
-
+        if (!$link->set_charset(self::getConfig('mysql.charset', 'UTF-8'))) { // TODO 错误处理
+        }
 
         return $link;
     }
@@ -92,6 +137,10 @@ class DB {
     public function query($sql) {
         while (true) {
             $this->xconnect($sql);
+
+            if ($sql) {
+
+            }
         }
     }
 
