@@ -1,6 +1,9 @@
-Sample code.
+Sample code demonstrating some db client wrapper implementations for common use.
 
-Dependencies
-    * PHP: 5.3.x
-    * PHP Extensions:
-    	- Memcached
+Implementations
+	* MySQL
+		master-slave rw reparation
+		sharding based on id
+	* Redis
+		sharding based on id
+	
