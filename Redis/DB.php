@@ -29,7 +29,17 @@ class DB {
      *
      * @var array
      */
-    private static $config;
+    private static $config = array(
+        'core' => array(
+            'master' => null
+        ),
+        'global' => array(
+            'master' => null
+        ),
+        'shards' => array() // <id> => ''
+    );
+
+
 
     /**
      *
@@ -55,23 +65,42 @@ class DB {
      */
     private function __construct($shard_key = null) {
         if (!isset($shard_key)) {
-            list($this->host, $this->port) = self::parseDSN(self::getConfig('global.master'));
+            $this->host = self::$config['global']['host'];
+            $this->port = self::$config['global']['port'];
+            return $this;
         }
 
         // sharding
-        if (is_int($shard_key)) {
+        if (!is_int($shard_key)) {
             throw new Exception();
         }
 
         if (!isset(self::$objRedisMaster)) {
             self::$objRedisMaster = new Redis();
-            list($host, $port) = self::parseDSN(self::getConfig('core.master'));
+            $host = self::$config['core']['master.host'];
+            $port = self::$config['core']['master.port'];
             if (!self::$objRedisMaster->connect($host, $port)) {
                 throw new Exception('cannot connect to master redis server');
             }
+            if (!self::$objRedisMaster->select(1)) {
+                throw new Exception('cannot select database');
+            }
         }
 
-    //
+        $shard_id = self::$objRedisMaster->get($shard_key);
+        if ($shard_id === false) {
+            $shard_id = array_rand(self::$config['shards']);
+            self::$objRedisMaster->set($shard_key, $shard_id);
+            // it's important to keep it persistently
+            if (!self::$objRedisMaster->save()) {
+                throw new Exception('performs a synchronous save unsuccessfully');
+            }
+        }
+
+        if (isset(self::$config['shards'][$shard_id])) {
+            $this->host = self::$config['shards'][$shard_id]['host'];
+            $this->port = self::$config['shards'][$shard_id]['port'];
+        }
     }
 
     /**
@@ -82,7 +111,7 @@ class DB {
     public static function getInstance($shard_key = null) {
         if (isset($shard_key)) {
             if (!isset(self::$instances[$shard_key])) {
-                self::$instances[$shard_key] = new self();
+                self::$instances[$shard_key] = new self($shard_key);
             }
             return self::$instances[$shard_key];
         } else {
@@ -104,54 +133,65 @@ class DB {
             throw new Exception();
         }
         foreach ($config as $key => $val) {
-            // sections starting with 'shard' all are shard slots
             if (strpos($key, 'shard') === 0) {
-                self::$config['shards'][] = $val;
+                $pieces = explode(' ', $key);
+                if (count($pieces) === 2 && $pieces[0] === 'shard') {
+                    if (!ctype_digit($pieces[1]) || $pieces[1] <= 0) {
+                        throw new Exception('shard id should be positive number');
+                    }
+                    self::$config['shards'][$pieces[1]] = $val;
+                }
+            } else if ($key === 'core') {
+                self::$config['core'] = $val;
+            } else if ($key === 'global') {
+                self::$config['global'] = $val;
             } else {
-                self::$config[$key] = $val;
+                // ignore
+            }
+        }
+    }
+
+    /**
+     * A lazy connector.
+     *
+     * @return void
+     */
+    private function xconnect() {
+        if (!isset($this->objRedis)) {
+            $this->objRedis = new Redis();
+            if (!$this->objRedis->connect($this->host, $this->port)) {
+                $this->objRedis = null;
+                throw new Exception(sprintf('failed to connect to server (%s:%d)', $this->host, $this->port));
             }
         }
     }
 
     /**
      *
-     * @param string $configname
-     * @param string | null $default, optional, defaults to null
+     * @param string $key
+     * @return string
      */
-    private static function getConfig($configname, $default = NULL) {
-        if (!is_string($configname)) {
-            throw new Exception();
+    public function get($key) {
+        $this->xconnect();
+        if (!is_string($key)) {
+            throw new Exception('key should be string');
         }
-        $sections = explode('.', $configname);
-        $config = self::$config;
-        while ($section = array_shift($sections)) {
-            if (isset($config[$section])) {
-                $config = $config[$section];
-            } else {
-                return $default;
-            }
-        }
-        return $config;
+        return $this->objRedis->get($key);
     }
 
     /**
      *
-     * @param string $config
-     * @return array
-     * - string (host)
-     * - integer (port)
+     * @param string $key
+     * @param string $val
      */
-    private static function parseDSN($config) {
-        if (!is_string($config)) {
-            throw new Exception();
+    public function set($key, $val) {
+        $this->xconnect();
+        if (!is_string($key)) {
+            throw new Exception('key should be string');
         }
-        $configs = explode(':', $config);
-        if (!is_array($configs) || count($configs) !== 2) {
-            throw new Exception();
+        if (!is_string($val)) {
+            throw new Exception('val should be string');
         }
-        return array(
-            $configs[0], // host
-            (int)$configs[1] // port
-        );
+        return $this->objRedis->set($key, $val);
     }
 }
