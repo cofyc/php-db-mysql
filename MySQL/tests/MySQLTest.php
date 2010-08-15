@@ -5,7 +5,7 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-require_once 'MySQL/DB.php';
+require_once '../MySQL/DB.php';
 
 class MySQLTest extends PHPUnit_Framework_TestCase {
 
@@ -13,7 +13,7 @@ class MySQLTest extends PHPUnit_Framework_TestCase {
      * @dataProvider provider
      */
     public function testInstance($uid, $data) {
-        DB::loadConfigFromFile(CO_ROOT_PATH . '/MySQL/config.ini');
+        DB::loadConfigFromFile(CO_ROOT_PATH . '/config.ini');
         $objDB = DB::getInstance($uid);
         $sql = 'INSERT INTO `user`
         	( `uid`

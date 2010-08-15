@@ -5,12 +5,12 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-require_once 'Redis/DB.php';
+require_once '../Redis/DB.php';
 
 class RedisTest extends PHPUnit_Framework_TestCase {
 
     protected function setUp() {
-        DB::loadConfigFromFile(CO_ROOT_PATH . '/Redis/config.ini');
+        DB::loadConfigFromFile(CO_ROOT_PATH . '/config.ini');
     }
 
     /**
