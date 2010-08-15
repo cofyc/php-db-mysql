@@ -14,6 +14,12 @@ class DB {
     private static $instance;
 
     /**
+     * Shard DBs
+     * @var DB
+     */
+    private static $instances = array();
+
+    /**
      *
      * @var array
      */
@@ -31,7 +37,7 @@ class DB {
      *
      * @var array, array of mysqlis
      */
-    private $links;
+    private static $links;
 
     /**
      * Master Switch
@@ -48,6 +54,20 @@ class DB {
 
     /**
      *
+     * @var
+     */
+    private $host;
+
+    private $port;
+
+    private $username;
+
+    private $passwd;
+
+    private $dbname;
+
+    /**
+     *
      * @var array
      */
     private $dsn_slaves;
@@ -60,22 +80,140 @@ class DB {
 
     /**
      *
+     * @var mysqli
+     */
+    private static $objLinkIndex;
+
+    /**
+     *
+     * @var array
+     */
+    private static $shard_indices = array();
+
+    /**
+     *
      * @param integer $shard_key, optional
      */
     private function __construct($shard_key = null) {
         if (!isset($shard_key)) {
             $this->dsn = self::getConfig('global.master');
+            return $this;
         }
 
         // sharding
-        if (is_int($shard_key)) {
+        try {
+            $shard = self::sharding($shard_key);
+        } catch (Exception $e) {
+            throw new $e();
+        }
+
+        $this->dsn = $shard['master'];
+    }
+
+    /**
+     *
+     * @param integer $shard_key
+     * @throws Exception
+     * @return array $shard
+     */
+    private static function sharding($shard_key) {
+        if (!is_int($shard_key)) {
             throw new Exception();
         }
 
-        if (!isset(self::$objMemcached)) {
-            self::$objMemcached = new Memcached();
-            self::$objMemcached->addServer(self::getConfig('core.memcache_host'), self::getConfig('core.memcache_port'));
+        $shards = self::getConfig('shards');
+        if (!is_array($shards)) {
+            throw new Exception();
         }
+
+        if (!isset(self::$shard_indices[$shard_key])) {
+            if (!isset(self::$objMemcached)) {
+                self::$objMemcached = new Memcached();
+                if (!self::$objMemcached->addServer(self::getConfig('core.memcache_host'), self::getConfig('core.memcache_port'))) {
+                    throw new Exception();
+                }
+            }
+
+            $shard_id = self::$objMemcached->get($shard_key);
+            if ($shard_id === false) {
+                $infos = self::parseDSN(self::getConfig('core.master'));
+                if (!$infos) {
+                    throw new Exception();
+                }
+                if (!isset(self::$objLinkIndex)) {
+                    self::$objLinkIndex = self::_xconnect($infos['host'], $infos['port'], $infos['username'], $infos['passwd'], $infos['dbname']);
+                }
+                if (!self::$objLinkIndex->select_db($infos['dbname'])) {
+                    throw new Exception();
+                }
+
+                try {
+                    // read from index db
+                    $result = self::$objLinkIndex->query("SELECT shard_id FROM index_user WHERE uid = " . (int)$shard_key);
+                    if (!$result) {
+                        throw new Exception();
+                    }
+                    $row = $result->fetch_assoc();
+                    if (!$row || !isset($row['shard_id'])) {
+                        throw new Exception();
+                    }
+                    $shard_id = (int)$row['shard_id'];
+                } catch (Exception $e) {
+                    // TODO random allocate
+                    $shard_id = self::random_sharding($shards);
+                }
+
+                if (!isset($shards[$shard_id])) {
+                    throw new Exception('shard id does not exist');
+                }
+
+                $sql = 'INSERT INTO index_user
+                	( `uid`
+                	, `shard_id`
+                	) VALUE
+                	( ' . (int)$shard_key . '
+                	, ' . (int)$shard_id . '
+                	)
+				';
+                if (!self::$objLinkIndex->query($sql)) {
+                    throw new Exception();
+                }
+
+                @self::$objMemcached->set($shard_key, $shard_id); // ignore this error
+            }
+
+            self::$shard_indices[$shard_key] = $shard_id;
+        }
+
+        if (!isset($shards[self::$shard_indices[$shard_key]])) {
+            throw new Exception();
+        }
+
+        return $shards[self::$shard_indices[$shard_key]];
+    }
+
+    /**
+     *
+     * @param array $shards
+     * @throws Exception
+     * @return integer
+     */
+    private static function random_sharding($shards) {
+        if (!is_array($shards)) {
+            throw new Exception();
+        }
+        $total_weight = 0;
+        foreach ($shards as $shard_id => $shard) {
+            $total_weight += $shard['weight'];
+            $shards[$shard_id]['tmp_weight'] = $total_weight;
+        }
+        $random_weight = mt_rand(0, $total_weight - 1);
+        foreach ($shards as $shard_id => $shard) {
+            if ($random_weight < $shard['tmp_weight']) {
+                return $shard_id;
+            }
+        }
+        throw new Exception('failed');
     }
 
     /**
@@ -84,10 +222,17 @@ class DB {
      * @return DB
      */
     public static function getInstance($shard_key = null) {
-        if (!isset(self::$instance)) {
-            self::$instance = new self($shard_key);
+        if (!isset($shard_key)) {
+            if (!isset(self::$instance)) {
+                self::$instance = new self();
+            }
+            return self::$instance;
         }
-        return self::$instance;
+
+        if (!isset(self::$instances[$shard_key])) {
+            self::$instances[$shard_key] = new self($shard_key);
+        }
+        return self::$instances[$shard_key];
     }
 
     /**
@@ -100,11 +245,20 @@ class DB {
             throw new Exception();
         }
         foreach ($config as $key => $val) {
-            // sections starting with 'shard' all are shard slots
             if (strpos($key, 'shard') === 0) {
-                self::$config['shards'][] = $val;
+                $pieces = explode(' ', $key);
+                if (count($pieces) === 2 && $pieces[0] === 'shard') {
+                    if (!ctype_digit($pieces[1]) || $pieces[1] <= 0) {
+                        throw new Exception('shard id should be positive number');
+                    }
+                    self::$config['shards'][$pieces[1]] = $val;
+                }
+            } else if ($key === 'core') {
+                self::$config['core'] = $val;
+            } else if ($key === 'global') {
+                self::$config['global'] = $val;
             } else {
-                self::$config[$key] = $val;
+                // ignore
             }
         }
     }
@@ -137,16 +291,26 @@ class DB {
      * @return void
      */
     private function xconnect($sql) {
-        $dsn = $this->dsn;
-
-        if (self::isReadSql($sql) && !$this->master) {
-            $dsn_slaves = self::getConfig('global.slaves');
-            if (isset($dsn_slaves)) {
-                $dsn = $dsn_slaves[array_rand($dsn_slaves)];
-            }
+        $infos = self::parseDSN($this->dsn);
+        if (!$infos) {
+            throw new Exception('dsn format is wrong');
         }
 
-        $link = $this->_xconnect($dsn);
+        $this->host = $infos['host'];
+        $this->port = $infos['port'];
+        $this->username = $infos['username'];
+        $this->passwd = $infos['passwd'];
+        $this->dbname = $infos['dbname'];
+
+        //        if (self::isReadSql($sql) && !$this->master) {
+        //            $dsn_slaves = self::getConfig('global.slaves');
+        //            if (isset($dsn_slaves)) {
+        //                $dsn = $dsn_slaves[array_rand($dsn_slaves)];
+        //            }
+        //        }
+
+
+        $link = self::_xconnect($this->host, $this->port, $this->username, $this->passwd, $this->dbname);
         if ($link === false) {
             throw new Exception();
         }
@@ -155,25 +319,20 @@ class DB {
     }
 
     /**
+     * DB connector with a connection pool.
      *
-     * @param string $dsn
+     * @param string $host
+     * @param integer $port
+     * @param string $username
+     * @param string $passwd
+     * @param string $dbname
      * @return mysqli, false on failure
      */
-    private function _xconnect($dsn) {
-        $infos = parse_url($dsn);
-        if ($infos === false) {
-            throw new Exception();
-        }
-
-        $host = $infos['host'];
-        $port = isset($infos['port']) ? $infos['port'] : 3306;
-        $username = $infos['user'];
-        $passwd = $infos['pass'];
-        $dbname = substr($infos['path'], 1);
+    private static function _xconnect($host, $port, $username, $passwd, $dbname) {
         $mysql_unique_id = $host . $port;
 
-        if (isset($this->links[$mysql_unique_id])) {
-            return $this->links[$mysql_unique_id];
+        if (isset(self::$links[$mysql_unique_id])) {
+            return self::$links[$mysql_unique_id];
         }
 
         $link = new mysqli();
@@ -185,9 +344,29 @@ class DB {
             return false;
         }
 
-        $this->links[$mysql_unique_id] = $link;
+        self::$links[$mysql_unique_id] = $link;
 
         return $link;
+    }
+
+    /**
+     *
+     * @param array $dsn
+     * @return array, false on failure
+     */
+    private static function parseDSN($dsn) {
+        $infos = parse_url($dsn);
+        if ($infos === false) {
+            return false;
+        }
+
+        return array(
+            'host' => $infos['host'],
+            'port' => isset($infos['port']) ? $infos['port'] : 3306,
+            'username' => $infos['user'],
+            'passwd' => $infos['pass'],
+            'dbname' => substr($infos['path'], 1)
+        );
     }
 
     /**
@@ -197,6 +376,9 @@ class DB {
      */
     public function query($sql) {
         $this->xconnect($sql);
+        if (!$this->link->select_db($this->dbname)) {
+            return false;
+        }
         return $this->link->query($sql);
     }
 
@@ -240,7 +422,8 @@ class DB {
             throw new Exception();
         }
 
-        $this->xconnect();
+        // connect to slave it presents with this sql
+        $this->xconnect('show status');
 
         return mysqli_real_escape_string($this->link, $value);
     }

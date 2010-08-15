@@ -9,16 +9,42 @@ require_once 'MySQL/DB.php';
 
 class MySQLTest extends PHPUnit_Framework_TestCase {
 
-	public function testInstance() {
-		DB::loadConfigFromFile(CO_ROOT_PATH . '/MySQL/config.ini');
-		$objDB = DB::getInstance();
-		$this->assertTrue($objDB instanceof DB);
-		$mysqli_result = DB::getInstance()->query('show status');
-		$result1 = mysqli_num_rows($mysqli_result);
-		$mysqli_result = DB::getInstance()->setMaster(true);
-		$mysqli_result = DB::getInstance()->query('show status');
-		$result2 = mysqli_num_rows($mysqli_result);
-		$this->assertTrue($result1 !== $result2);
-	}
+    /**
+     * @dataProvider provider
+     */
+    public function testInstance($uid, $data) {
+        DB::loadConfigFromFile(CO_ROOT_PATH . '/MySQL/config.ini');
+        $objDB = DB::getInstance($uid);
+        $sql = 'INSERT INTO `user`
+        	( `uid`
+        	, `data`
+        	) VALUE
+        	( ' . $objDB->quote($uid) . '
+        	, ' . $objDB->quote($data) . '
+        	)
+		';
+        $this->assertTrue(DB::getInstance($uid)->query($sql));
+        $sql = 'SELECT * FROM `user`
+        	WHERE `uid` = ' . DB::getInstance($uid)->quote($uid) . '
+        	LIMIT 1
+        ';
+        $result = DB::getInstance($uid)->query($sql);
+        $this->assertTrue($result instanceof mysqli_result);
+        $row = $result->fetch_assoc();
+        $this->assertTrue(is_array($row));
+        $this->assertTrue((int)$row['uid'] === $uid);
+        $this->assertTrue($row['data'] === $data);
+    }
 
+    public function provider() {
+        $data = array();
+        for ($i = 0; $i < 1000; $i++) {
+            $data[] = array(
+                mt_rand(1, mt_getrandmax()),
+                sha1(mt_rand())
+            );
+        }
+
+        return $data;
+    }
 }
