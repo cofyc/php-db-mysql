@@ -6,8 +6,3 @@ Implementations
 		sharding based on id
 	* Redis
 		sharding based on id
-
-
-TODO
-    * MySQL
-        master-slave
