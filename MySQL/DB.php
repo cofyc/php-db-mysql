@@ -175,7 +175,7 @@ class DB {
                     }
                 }
 
-                @self::$objMemcached->set($shard_key, $shard_id); // ignore this error
+                @self::$objMemcached->set($shard_key, $shard_id, 60*60*24*30); // ignore this error
             }
 
             self::$shard_indices[$shard_key] = $shard_id;
