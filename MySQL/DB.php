@@ -104,10 +104,10 @@ class DB {
         try {
             $shard = self::sharding($shard_key);
         } catch (Exception $e) {
-            throw new $e();
+            throw new $e;
         }
 
-        $this->dsn = $shard['master'];
+        $this->dsn = $shard['dsn'];
     }
 
     /**
@@ -136,47 +136,43 @@ class DB {
 
             $shard_id = self::$objMemcached->get($shard_key);
             if ($shard_id === false) {
+                // init index db
                 $infos = self::parseDSN(self::getConfig('core.master'));
                 if (!$infos) {
-                    throw new Exception();
+                    throw new Exception('no sharding master config');
                 }
                 if (!isset(self::$objLinkIndex)) {
                     self::$objLinkIndex = self::_xconnect($infos['host'], $infos['port'], $infos['username'], $infos['passwd'], $infos['dbname']);
                 }
                 if (!self::$objLinkIndex->select_db($infos['dbname'])) {
-                    throw new Exception();
+                    throw new Exception('db error');
                 }
 
+                // try to read from index db
                 try {
-                    // read from index db
                     $result = self::$objLinkIndex->query("SELECT shard_id FROM index_user WHERE uid = " . (int)$shard_key);
                     if (!$result) {
-                        throw new Exception();
+                        throw new Exception('failed to get index');
                     }
                     $row = $result->fetch_assoc();
                     if (!$row || !isset($row['shard_id'])) {
-                        throw new Exception();
+                        throw new Exception('failed to get shard id');
                     }
                     $shard_id = (int)$row['shard_id'];
                 } catch (Exception $e) {
-                    // TODO random allocate
+                    // or random allocates and stores it right now
                     $shard_id = self::random_sharding($shards);
-                }
-
-                if (!isset($shards[$shard_id])) {
-                    throw new Exception('shard id does not exist');
-                }
-
-                $sql = 'INSERT INTO index_user
-                	( `uid`
-                	, `shard_id`
-                	) VALUE
-                	( ' . (int)$shard_key . '
-                	, ' . (int)$shard_id . '
-                	)
-				';
-                if (!self::$objLinkIndex->query($sql)) {
-                    throw new Exception();
+                    $sql = 'INSERT INTO index_user
+                    	( `uid`
+                    	, `shard_id`
+                    	) VALUE
+                    	( ' . (int)$shard_key . '
+                    	, ' . (int)$shard_id . '
+                    	)
+    				';
+                    if (!self::$objLinkIndex->query($sql)) {
+                        throw new Exception('query failed');
+                    }
                 }
 
                 @self::$objMemcached->set($shard_key, $shard_id); // ignore this error
@@ -186,7 +182,7 @@ class DB {
         }
 
         if (!isset($shards[self::$shard_indices[$shard_key]])) {
-            throw new Exception();
+            throw new Exception('shard id does not exist');
         }
 
         return $shards[self::$shard_indices[$shard_key]];

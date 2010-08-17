@@ -9,11 +9,14 @@ require_once '../MySQL/DB.php';
 
 class MySQLTest extends PHPUnit_Framework_TestCase {
 
+    public function setUp() {
+        DB::loadConfigFromFile(CO_ROOT_PATH . '/config.ini');
+    }
+
     /**
      * @dataProvider provider
      */
-    public function testInstance($uid, $data) {
-        DB::loadConfigFromFile(CO_ROOT_PATH . '/config.ini');
+    public function testSharding($uid, $data) {
         $objDB = DB::getInstance($uid);
         $sql = 'INSERT INTO `user`
         	( `uid`
@@ -36,9 +39,22 @@ class MySQLTest extends PHPUnit_Framework_TestCase {
         $this->assertTrue($row['data'] === $data);
     }
 
+    /**
+     *
+     */
+    public function testCaching() {
+         $link = new mysqli();
+         $link->real_connect('127.0.0.1', 'root', 'root', 'dbtest_shard_index', null, null, MYSQLI_CLIENT_COMPRESS);
+         $result = $link->query('SELECT * FROM index_user');
+         while ($row = mysqli_fetch_assoc($result)) {
+             $objDB = DB::getInstance((int)$row['uid']);
+             $this->assertTrue($objDB instanceof DB);
+         }
+    }
+
     public function provider() {
         $data = array();
-        for ($i = 0; $i < 1000; $i++) {
+        for ($i = 0; $i < 100; $i++) {
             $data[] = array(
                 mt_rand(1, mt_getrandmax()),
                 sha1(mt_rand())
