@@ -1,3 +1,3 @@
 MySQL
   - Master-slave rw reparation
-  - Sharding transfer mechanism
+  - a better transaction mechanism

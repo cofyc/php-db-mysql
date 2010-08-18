@@ -14,7 +14,7 @@ class DB {
     private static $instance;
 
     /**
-     * Shard DBs
+     *
      * @var DB
      */
     private static $instances = array();
@@ -68,6 +68,17 @@ class DB {
 
     /**
      *
+     * @var string
+     */
+    private $sql;
+
+    /**
+     * @var mysqli_result
+     */
+    private $result;
+
+    /**
+     *
      * @var array
      */
     private $dsn_slaves;
@@ -76,13 +87,13 @@ class DB {
      *
      * @var Memcached
      */
-    private static $objMemcached;
+    private static $objShardingIndexCacher;
 
     /**
      *
      * @var mysqli
      */
-    private static $objLinkIndex;
+    private static $objShardingMaster;
 
     /**
      *
@@ -92,22 +103,51 @@ class DB {
 
     /**
      *
-     * @param integer $shard_key, optional
+     * @param string $dsn
+     * @return DB
      */
-    private function __construct($shard_key = null) {
+    private function __construct($dsn) {
+        $this->dsn = $dsn;
+        return $this;
+    }
+
+    /**
+     *
+     * @param integer $shard_key, optional
+     * @throws Exception
+     * @return DB
+     */
+    private static function factory($shard_key = null) {
         if (!isset($shard_key)) {
-            $this->dsn = self::getConfig('global.master');
-            return $this;
+            return new self(self::getConfig('global.master'));
         }
 
         // sharding
         try {
             $shard = self::sharding($shard_key);
         } catch (Exception $e) {
-            throw new $e;
+            throw new $e();
         }
 
-        $this->dsn = $shard['dsn'];
+        return new self($shard['dsn']);
+    }
+
+    /**
+     *
+     * @param integer $shard_id
+     * @throws Exception
+     * @return DB
+     */
+    public static function factoryByShardId($shard_id) {
+        if (!is_int($shard_id)) {
+            throw new Exception();
+        }
+        $shards = self::getConfig('shards');
+        if (!isset($shards[$shard_id])) {
+            throw new Exception();
+        }
+
+        return new self($shards[$shard_id]['dsn']);
     }
 
     /**
@@ -127,30 +167,15 @@ class DB {
         }
 
         if (!isset(self::$shard_indices[$shard_key])) {
-            if (!isset(self::$objMemcached)) {
-                self::$objMemcached = new Memcached();
-                if (!self::$objMemcached->addServer(self::getConfig('core.memcache_host'), self::getConfig('core.memcache_port'))) {
-                    throw new Exception();
-                }
-            }
+            self::xShardingIndexCacher();
 
-            $shard_id = self::$objMemcached->get($shard_key);
+            $shard_id = self::$objShardingIndexCacher->get(self::getIndexCacheKey($shard_key));
             if ($shard_id === false) {
-                // init index db
-                $infos = self::parseDSN(self::getConfig('core.master'));
-                if (!$infos) {
-                    throw new Exception('no sharding master config');
-                }
-                if (!isset(self::$objLinkIndex)) {
-                    self::$objLinkIndex = self::_xconnect($infos['host'], $infos['port'], $infos['username'], $infos['passwd'], $infos['dbname']);
-                }
-                if (!self::$objLinkIndex->select_db($infos['dbname'])) {
-                    throw new Exception('db error');
-                }
+                self::xShardingMaster();
 
                 // try to read from index db
                 try {
-                    $result = self::$objLinkIndex->query("SELECT shard_id FROM index_user WHERE uid = " . (int)$shard_key);
+                    $result = self::$objShardingMaster->query("SELECT shard_id FROM index_user WHERE uid = " . (int)$shard_key);
                     if (!$result) {
                         throw new Exception('failed to get index');
                     }
@@ -170,12 +195,12 @@ class DB {
                     	, ' . (int)$shard_id . '
                     	)
     				';
-                    if (!self::$objLinkIndex->query($sql)) {
+                    if (!self::$objShardingMaster->query($sql)) {
                         throw new Exception('query failed');
                     }
                 }
 
-                @self::$objMemcached->set($shard_key, $shard_id, 60*60*24*30); // ignore this error
+                @self::$objShardingIndexCacher->set(self::getIndexCacheKey($shard_key), $shard_id, 60 * 60 * 24 * 30); // ignore this error
             }
 
             self::$shard_indices[$shard_key] = $shard_id;
@@ -215,18 +240,19 @@ class DB {
     /**
      *
      * @param integer $shard_key, optional
+     * @throws Exception
      * @return DB
      */
     public static function getInstance($shard_key = null) {
         if (!isset($shard_key)) {
             if (!isset(self::$instance)) {
-                self::$instance = new self();
+                self::$instance = self::factory();
             }
             return self::$instance;
         }
 
         if (!isset(self::$instances[$shard_key])) {
-            self::$instances[$shard_key] = new self($shard_key);
+            self::$instances[$shard_key] = self::factory($shard_key);
         }
         return self::$instances[$shard_key];
     }
@@ -234,6 +260,8 @@ class DB {
     /**
      *
      * @param string $config_file
+     * @throws Exception
+     * @return void
      */
     public static function loadConfigFromFile($config_file) {
         $config = @parse_ini_file($config_file, true);
@@ -261,14 +289,201 @@ class DB {
 
     /**
      *
-     * @param string $configname
-     * @param string | null $default, optional, defaults to null
+     * @param integer $shard_key
+     * @throws Exception
+     * @return string
      */
-    private static function getConfig($configname, $default = NULL) {
-        if (!is_string($configname)) {
+    private static function getIndexCacheKey($shard_key) {
+        if (!is_int($shard_key)) {
             throw new Exception();
         }
-        $sections = explode('.', $configname);
+        return sprintf('db/sharding/%d', $shard_key);
+    }
+
+    /**
+     * Index Cache Warm-Up
+     *
+     * @throws Exception
+     * @return array
+     * - total: integer
+     * - cached: integer
+     * - ignored: integer
+     */
+    public static function warmUpIndexCache() {
+        self::xShardingMaster();
+        self::xShardingIndexCacher();
+
+        $result = self::$objShardingMaster->query('SELECT uid, locked, shard_id FROM index_user');
+        if (!$result) {
+            throw new Exception('faild to read index from db');
+        }
+
+        $stats = array(
+            'total' => 0,
+            'cached' => 0,
+            'failed' => 0,
+            'ignored' => 0
+        );
+        while ($row = mysqli_fetch_assoc($result)) {
+            $stats['total']++;
+            if ($row['locked']) {
+                $stats['ignored']++;
+                continue;
+            }
+
+            if (!self::$objShardingIndexCacher->set(self::getIndexCacheKey((int)$row['uid']), $row['shard_id'], 60 * 60 * 24 * 30)) {
+                $stats['failed']++;
+            } else {
+                $stats['cached']++;
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     *
+     * @throws Exception
+     * @return void
+     */
+    private static function xShardingMaster() {
+        $infos = self::parseDSN(self::getConfig('core.master'));
+        if (!$infos) {
+            throw new Exception('core master config is wrong');
+        }
+
+        if (!isset(self::$objShardingMaster)) {
+            self::$objShardingMaster = self::_xconnect($infos['host'], $infos['port'], $infos['username'], $infos['passwd'], $infos['dbname']);
+            if (!self::$objShardingMaster) {
+                $objShardingMaster = null;
+                throw new Exception('cannot connect to master');
+            }
+        }
+
+        if (!self::$objShardingMaster->select_db($infos['dbname'])) {
+            throw new Exception(sprintf('cannot select to db (%s)', $infos['dbname']));
+        }
+    }
+
+    /**
+     *
+     * @throws Exception
+     * @return void
+     */
+    private static function xShardingIndexCacher() {
+        if (self::$objShardingIndexCacher) {
+            return;
+        }
+        self::$objShardingIndexCacher = new Memcached();
+        if (!self::$objShardingIndexCacher->addServer(self::getConfig('core.memcache_host'), self::getConfig('core.memcache_port'))) {
+            self::$objShardingIndexCacher = null;
+            throw new Exception('failed to add cache server');
+        }
+    }
+
+    /**
+     * Start a sharding transfer transaction.
+     * @param integer $shard_key
+     * @throws Exception
+     */
+    public static function startTransfer($shard_key) {
+        if (!is_int($shard_key)) {
+            throw new Exception();
+        }
+
+        self::xShardingIndexCacher();
+        self::xShardingMaster();
+
+        if (!self::$objShardingIndexCacher->delete(self::getIndexCacheKey($shard_key))) {
+            if (self::$objShardingIndexCacher->getResultCode() !== Memcached::RES_NOTFOUND) {
+                throw new Exception();
+            }
+        }
+
+        $sql = 'UPDATE index_user
+        	SET locked = 1
+        	WHERE uid = ' . (int)$shard_key . '
+        		&& locked = 0
+        ';
+        if (!self::$objShardingMaster->query($sql)) {
+            throw new Exception(sprintf('failed to lock shard_key (%d)', $shard_key));
+        }
+    }
+
+	/**
+     *
+     * @param integer $shard_key
+     * @throws Exception
+     */
+    public static function resetTransfer($shard_key) {
+        if (!is_int($shard_key)) {
+            throw new Exception();
+        }
+
+
+        self::xShardingIndexCacher();
+        self::xShardingMaster();
+
+        if (!self::$objShardingIndexCacher->delete(self::getIndexCacheKey($shard_key))) {
+            if (self::$objShardingIndexCacher->getResultCode() !== Memcached::RES_NOTFOUND) {
+                throw new Exception();
+            }
+        }
+
+        $sql = 'UPDATE index_user
+        	SET locked = 0
+        	WHERE uid = ' . (int)$shard_key . '
+        		&& locked = 1
+		';
+        if (!self::$objShardingMaster->query($sql)) {
+            throw new Exception(sprintf('failed to unlock shard_key (%d)', $shard_key));
+        }
+    }
+
+    /**
+     *
+     * @param integer $shard_key
+     * @param integer $shard_id
+     * @throws Exception
+     */
+    public static function endTransfer($shard_key, $shard_id) {
+        if (!is_int($shard_key)) {
+            throw new Exception();
+        }
+
+        if (!is_int($shard_id)) {
+            throw new Exception();
+        }
+
+        self::xShardingIndexCacher();
+        self::xShardingMaster();
+
+        if (!self::$objShardingIndexCacher->delete(self::getIndexCacheKey($shard_key))) {
+            if (self::$objShardingIndexCacher->getResultCode() !== Memcached::RES_NOTFOUND) {
+                throw new Exception();
+            }
+        }
+
+        $sql = 'UPDATE index_user
+        	SET locked = 0, shard_id = ' . (int)$shard_id . '
+        	WHERE uid = ' . (int)$shard_key . '
+        		&& locked = 1
+		';
+        if (!self::$objShardingMaster->query($sql)) {
+            throw new Exception(sprintf('failed to unlock shard_key (%d)', $shard_key));
+        }
+    }
+
+    /**
+     *
+     * @param string $name
+     * @param string | null $default, optional, defaults to null
+     */
+    private static function getConfig($name, $default = NULL) {
+        if (!is_string($name)) {
+            throw new Exception();
+        }
+        $sections = explode('.', $name);
         $config = self::$config;
         while ($section = array_shift($sections)) {
             if (isset($config[$section])) {
@@ -282,11 +497,10 @@ class DB {
 
     /**
      *
-     * @param string $sql, optinal
      * @throws Exception, if we cannot connect to db
      * @return void
      */
-    private function xconnect($sql) {
+    private function xconnect() {
         $infos = self::parseDSN($this->dsn);
         if (!$infos) {
             throw new Exception('dsn format is wrong');
@@ -298,17 +512,14 @@ class DB {
         $this->passwd = $infos['passwd'];
         $this->dbname = $infos['dbname'];
 
-        //        if (self::isReadSql($sql) && !$this->master) {
-        //            $dsn_slaves = self::getConfig('global.slaves');
-        //            if (isset($dsn_slaves)) {
-        //                $dsn = $dsn_slaves[array_rand($dsn_slaves)];
-        //            }
-        //        }
-
 
         $link = self::_xconnect($this->host, $this->port, $this->username, $this->passwd, $this->dbname);
         if ($link === false) {
             throw new Exception();
+        }
+
+        if (!$link->select_db($this->dbname)) {
+            throw new Exception('select db failed');
         }
 
         $this->link = $link;
@@ -347,40 +558,91 @@ class DB {
 
     /**
      *
-     * @param array $dsn
-     * @return array, false on failure
+     * @param string $sql
+     * @throws Exception
+     * @return DB
      */
-    private static function parseDSN($dsn) {
-        $infos = parse_url($dsn);
-        if ($infos === false) {
-            return false;
+    public function query($sql) {
+        $this->xconnect();
+        $result = $this->link->query($sql);
+        if ($result === false) {
+            throw new Exception('failed to query on db');
         }
-
-        return array(
-            'host' => $infos['host'],
-            'port' => isset($infos['port']) ? $infos['port'] : 3306,
-            'username' => $infos['user'],
-            'passwd' => $infos['pass'],
-            'dbname' => substr($infos['path'], 1)
-        );
+        $this->sql = $sql;
+        $this->result = $result;
+        return $this;
     }
 
     /**
      *
-     * @param string $sql
-     * @return mysqli_result or true, false on failure
+     * @throws Exception
      */
-    public function query($sql) {
-        $this->xconnect($sql);
-        if (!$this->link->select_db($this->dbname)) {
-            return false;
+    public function beginTransaction() {
+        $this->xconnect();
+        if (!$this->link->autocommit(false)) {
+            throw new Exception('failed to start transaction');
         }
-        return $this->link->query($sql);
+    }
+
+    /**
+     *
+     * @throws Exception
+     */
+    public function commit() {
+        $this->xconnect();
+        if (!$this->link->commit()) {
+            throw new Exception('failed to commit');
+        }
+    }
+
+    /**
+     *
+     * @throws Exception
+     */
+    public function rollBack() {
+        $this->xconnect();
+        if (!$this->link->rollback()) {
+            throw new Exception('failed to rollback');
+        }
+    }
+
+    /**
+     *
+     * @throws Exception
+     * @return array, false
+     */
+    public function fetch() {
+        if (!isset($this->result)) {
+            throw new Exception('no results to fetch');
+        }
+        $row = $this->result->fetch_assoc();
+        $this->result->free();
+        $this->result = null;
+        return $row;
+    }
+
+    /**
+     *
+     * @throws Exception
+     * @return array
+     */
+    public function fetchAll() {
+        if (!isset($this->result)) {
+            throw new Exception('no results to fetch');
+        }
+        $rows = array();
+        while ($row = $this->result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $this->result->free();
+        $this->result = null;
+        return $rows;
     }
 
     /**
      *
      * @param mixed $value, can be int/float/string
+     * @throws Exception
      * @return string
      */
     public function quote($value) {
@@ -397,20 +659,8 @@ class DB {
 
     /**
      *
-     * @param boolean $master
-     * @return
-     */
-    public function setMaster($master) {
-        if (!is_bool($master)) {
-            throw new Exception();
-        }
-
-        $this->master = $master;
-    }
-
-    /**
-     *
      * @param string $value
+     * @throws Exception
      * @return string
      */
     private function escape($value) {
@@ -418,10 +668,22 @@ class DB {
             throw new Exception();
         }
 
-        // connect to slave it presents with this sql
-        $this->xconnect('show status');
+        $this->xconnect();
 
         return mysqli_real_escape_string($this->link, $value);
+    }
+
+    /**
+     *
+     * @param boolean $master
+     * @throws Exception
+     */
+    public function setMaster($master) {
+        if (!is_bool($master)) {
+            throw new Exception();
+        }
+
+        $this->master = $master;
     }
 
     /**
@@ -440,5 +702,25 @@ class DB {
             if (strpos($sql, $op) === 0) return true;
         }
         return false;
+    }
+
+    /**
+     *
+     * @param array $dsn
+     * @return array, false on failure
+     */
+    private static function parseDSN($dsn) {
+        $infos = parse_url($dsn);
+        if ($infos === false) {
+            return false;
+        }
+
+        return array(
+            'host' => $infos['host'],
+            'port' => isset($infos['port']) ? $infos['port'] : 3306,
+            'username' => $infos['user'],
+            'passwd' => $infos['pass'],
+            'dbname' => substr($infos['path'], 1)
+        );
     }
 }
