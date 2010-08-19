@@ -7,15 +7,42 @@
 
 require_once '../MySQL/DB.php';
 
+$config = array(
+    'global' => array(
+        'master' => 'mysql://root:root@127.0.0.1:3306/dbtest_global'
+    ),
+	'master' => array(
+        'charset' => 'utf8',
+        'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_index',
+        'memcache_host' => '127.0.0.1',
+        'memcache_port' => '11211'
+    ),
+    'shards' => array(
+        1 => array(
+            'weight' => '10',
+            'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_1'
+        ),
+        2 => array(
+            'weight' => '0',
+            'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_2'
+        ),
+        3 => array(
+            'weight' => '30',
+            'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_3'
+        )
+    )
+);
+
 class DBTest extends PHPUnit_Framework_TestCase {
 
     public function setUp() {
-        DB::loadConfigFromFile(CO_ROOT_PATH . '/config.ini');
+        global $config;
+        DB::setConfig($config);
         DB::startDebug();
     }
 
     public function tearDown() {
-        var_dump(DB::endDebug());
+        var_export(DB::endDebug());
     }
 
     /**
@@ -75,6 +102,9 @@ class DBTest extends PHPUnit_Framework_TestCase {
      */
     private function transferUser($uid, $to) {
         $objFromDB = DB::getInstance($uid);
+        $tables = array(
+            'user' => 'uid'
+        );
         $objToDB = DB::factoryByShardId($to);
         $sql = 'SELECT * FROM user WHERE uid = ' . $objFromDB->quote($uid);
         $rows = $objFromDB->query($sql)->fetchAll();
@@ -91,7 +121,6 @@ class DBTest extends PHPUnit_Framework_TestCase {
         		';
                 $objToDB->query($sql);
             }
-
             $objFromDB->beginTransaction();
             $objFromDB->query('DELETE FROM `user` WHERE uid = ' . DB::getInstance($uid)->quote($uid));
             $objFromDB->commit();

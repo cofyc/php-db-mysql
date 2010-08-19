@@ -26,7 +26,6 @@ class DB {
     private static $config;
 
     /**
-     * Currently selected
      *
      * @var mysqli
      */
@@ -40,13 +39,6 @@ class DB {
     private static $links;
 
     /**
-     * Master Switch
-     *
-     * @var boolean
-     */
-    private $master = false;
-
-    /**
      *
      * @var string
      */
@@ -54,16 +46,32 @@ class DB {
 
     /**
      *
-     * @var
+     * @var string
      */
     private $host;
 
+    /**
+     *
+     * @var integer
+     */
     private $port;
 
+    /**
+     *
+     * @var string
+     */
     private $username;
 
+    /**
+     *
+     * @var string
+     */
     private $passwd;
 
+    /**
+     *
+     * @var string
+     */
     private $dbname;
 
     /**
@@ -73,15 +81,10 @@ class DB {
     private $sql;
 
     /**
+     *
      * @var mysqli_result
      */
     private $result;
-
-    /**
-     *
-     * @var array
-     */
-    private $dsn_slaves;
 
     /**
      *
@@ -158,7 +161,6 @@ class DB {
         if (!isset($shards[$shard_id])) {
             throw new Exception();
         }
-
         return new self($shards[$shard_id]['dsn']);
     }
 
@@ -275,6 +277,7 @@ class DB {
      */
     public static function startDebug() {
         self::$debug = true;
+        self::$debug_infos = array();
     }
 
     /**
@@ -286,35 +289,6 @@ class DB {
         return self::$debug_infos;
     }
 
-    /**
-     *
-     * @param string $config_file
-     * @throws Exception
-     * @return void
-     */
-    public static function loadConfigFromFile($config_file) {
-        $config = @parse_ini_file($config_file, true);
-        if ($config === false) {
-            throw new Exception();
-        }
-        foreach ($config as $key => $val) {
-            if (strpos($key, 'shard') === 0) {
-                $pieces = explode(' ', $key);
-                if (count($pieces) === 2 && $pieces[0] === 'shard') {
-                    if (!ctype_digit($pieces[1]) || $pieces[1] <= 0) {
-                        throw new Exception('shard id should be positive number');
-                    }
-                    self::$config['shards'][$pieces[1]] = $val;
-                }
-            } else if ($key === 'core') {
-                self::$config['core'] = $val;
-            } else if ($key === 'global') {
-                self::$config['global'] = $val;
-            } else {
-                // ignore
-            }
-        }
-    }
 
     /**
      *
@@ -376,9 +350,9 @@ class DB {
      * @return void
      */
     private static function xShardingMaster() {
-        $infos = self::parseDSN(self::getConfig('core.master'));
+        $infos = self::parseDSN(self::getConfig('master.dsn'));
         if (!$infos) {
-            throw new Exception('core master config is wrong');
+            throw new Exception('master config is wrong');
         }
 
         if (!isset(self::$objShardingMaster)) {
@@ -404,7 +378,7 @@ class DB {
             return;
         }
         self::$objShardingIndexCacher = new Memcached();
-        if (!self::$objShardingIndexCacher->addServer(self::getConfig('core.memcache_host'), self::getConfig('core.memcache_port'))) {
+        if (!self::$objShardingIndexCacher->addServer(self::getConfig('master.memcache_host'), self::getConfig('master.memcache_port'))) {
             self::$objShardingIndexCacher = null;
             throw new Exception('failed to add cache server');
         }
@@ -504,6 +478,18 @@ class DB {
 
     /**
      *
+     * @param array $config
+     * @throws Exception
+     */
+    public static function setConfig($config) {
+        if (!is_array($config)) {
+            throw new Exception();
+        }
+        self::$config = $config;
+    }
+
+    /**
+     *
      * @param string $name
      * @param string | null $default, optional, defaults to null
      */
@@ -574,7 +560,7 @@ class DB {
             return false;
         }
 
-        if (!$link->set_charset(self::getConfig('core.charset', 'utf8'))) { // TODO 错误处理
+        if (!$link->set_charset(self::getConfig('master.charset', 'utf8'))) { // TODO 错误处理
             return false;
         }
 
@@ -591,18 +577,15 @@ class DB {
      */
     public function query($sql) {
         $this->xconnect();
-        if (self::$debug) {
-            self::$debug_infos[] = array(
-                'sql' => $sql,
-            );
-        }
-
         $result = $this->link->query($sql);
         if ($result === false) {
             throw new Exception('failed to query on db');
         }
         $this->sql = $sql;
         $this->result = $result;
+        if (self::$debug) {
+            @self::$debug_infos[] = $sql;
+        }
         return $this;
     }
 
@@ -612,9 +595,7 @@ class DB {
      */
     public function beginTransaction() {
         $this->xconnect();
-        if (!$this->link->autocommit(false)) {
-            throw new Exception('failed to start transaction');
-        }
+        $this->link->autocommit(false);
     }
 
     /**
@@ -623,11 +604,10 @@ class DB {
      */
     public function commit() {
         $this->xconnect();
+        $this->link->autocommit(true);
         if (!$this->link->commit()) {
-            $this->link->autocommit(true);
             throw new Exception('failed to commit');
         }
-        $this->link->autocommit(true);
     }
 
     /**
@@ -636,11 +616,10 @@ class DB {
      */
     public function rollBack() {
         $this->xconnect();
+        $this->link->autocommit(true);
         if (!$this->link->rollback()) {
-            $this->link->autocommit(true);
             throw new Exception('failed to rollback');
         }
-        $this->link->autocommit(true);
     }
 
     /**
@@ -649,13 +628,14 @@ class DB {
      * @return array, false
      */
     public function fetch() {
-        if (!isset($this->result)) {
-            throw new Exception('no results to fetch');
+        if ($this->result instanceof mysqli_result) {
+            $row = $this->result->fetch_assoc();
+            $this->result->free();
+            $this->result = null;
+            return $row;
+        } else {
+            throw new Exception('result is not a mysqli_result');
         }
-        $row = $this->result->fetch_assoc();
-        $this->result->free();
-        $this->result = null;
-        return $row;
     }
 
     /**
@@ -664,8 +644,8 @@ class DB {
      * @return array
      */
     public function fetchAll() {
-        if (!isset($this->result)) {
-            throw new Exception('no results to fetch');
+        if (!($this->result instanceof mysqli_result)) {
+            throw new Exception('result is not a mysqli_result');
         }
         $rows = array();
         while ($row = $this->result->fetch_assoc()) {
@@ -708,37 +688,6 @@ class DB {
         $this->xconnect();
 
         return mysqli_real_escape_string($this->link, $value);
-    }
-
-    /**
-     *
-     * @param boolean $master
-     * @throws Exception
-     */
-    public function setMaster($master) {
-        if (!is_bool($master)) {
-            throw new Exception();
-        }
-
-        $this->master = $master;
-    }
-
-    /**
-     *
-     * @param string $sql
-     * @return boolean
-     */
-    private static function isReadSql($sql) {
-        static $r_ops = array(
-            'select',
-            'show',
-            'desc'
-        );
-        $sql = strtolower(trim($sql));
-        foreach ($r_ops as $op) {
-            if (strpos($sql, $op) === 0) return true;
-        }
-        return false;
     }
 
     /**
