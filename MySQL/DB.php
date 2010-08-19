@@ -103,6 +103,18 @@ class DB {
 
     /**
      *
+     * @var boolean
+     */
+    private static $debug = false;
+
+    /**
+     *
+     * @var array
+     */
+    private static $debug_infos = array();
+
+    /**
+     *
      * @param string $dsn
      * @return DB
      */
@@ -259,6 +271,23 @@ class DB {
 
     /**
      *
+     * @return boolean
+     */
+    public static function startDebug() {
+        self::$debug = true;
+    }
+
+    /**
+     *
+     * @return array
+     */
+    public static function endDebug() {
+        self::$debug = false;
+        return self::$debug_infos;
+    }
+
+    /**
+     *
      * @param string $config_file
      * @throws Exception
      * @return void
@@ -410,7 +439,7 @@ class DB {
         }
     }
 
-	/**
+    /**
      *
      * @param integer $shard_key
      * @throws Exception
@@ -419,7 +448,6 @@ class DB {
         if (!is_int($shard_key)) {
             throw new Exception();
         }
-
 
         self::xShardingIndexCacher();
         self::xShardingMaster();
@@ -512,7 +540,6 @@ class DB {
         $this->passwd = $infos['passwd'];
         $this->dbname = $infos['dbname'];
 
-
         $link = self::_xconnect($this->host, $this->port, $this->username, $this->passwd, $this->dbname);
         if ($link === false) {
             throw new Exception();
@@ -564,6 +591,12 @@ class DB {
      */
     public function query($sql) {
         $this->xconnect();
+        if (self::$debug) {
+            self::$debug_infos[] = array(
+                'sql' => $sql,
+            );
+        }
+
         $result = $this->link->query($sql);
         if ($result === false) {
             throw new Exception('failed to query on db');
@@ -591,8 +624,10 @@ class DB {
     public function commit() {
         $this->xconnect();
         if (!$this->link->commit()) {
+            $this->link->autocommit(true);
             throw new Exception('failed to commit');
         }
+        $this->link->autocommit(true);
     }
 
     /**
@@ -602,8 +637,10 @@ class DB {
     public function rollBack() {
         $this->xconnect();
         if (!$this->link->rollback()) {
+            $this->link->autocommit(true);
             throw new Exception('failed to rollback');
         }
+        $this->link->autocommit(true);
     }
 
     /**

@@ -11,9 +11,12 @@ class DBTest extends PHPUnit_Framework_TestCase {
 
     public function setUp() {
         DB::loadConfigFromFile(CO_ROOT_PATH . '/config.ini');
+        DB::startDebug();
     }
 
-    public function tearDown() {}
+    public function tearDown() {
+        var_dump(DB::endDebug());
+    }
 
     /**
      * @dataProvider newUserDataProvider
@@ -64,21 +67,39 @@ class DBTest extends PHPUnit_Framework_TestCase {
         }
     }
 
+    /**
+     *
+     * @param integer $uid
+     * @param integer $to
+     * @throws Exception
+     */
     private function transferUser($uid, $to) {
-        $sql = 'SELECT * FROM user WHERE uid = ' . DB::getInstance($uid)->quote($uid);
-        $rows = DB::getInstance($uid)->query($sql)->fetchAll();
-        foreach ($rows as $row) {
-            $sql = 'INSERT INTO `user`
-            	( `uid`
-            	, `data`
-            	) VALUE
-            	( ' . DB::factoryByShardId($to)->quote($row['uid']) . '
-            	, ' . DB::factoryByShardId($to)->quote($row['data']) . '
-            	)
-    		';
-            DB::factoryByShardId($to)->query($sql);
+        $objFromDB = DB::getInstance($uid);
+        $objToDB = DB::factoryByShardId($to);
+        $sql = 'SELECT * FROM user WHERE uid = ' . $objFromDB->quote($uid);
+        $rows = $objFromDB->query($sql)->fetchAll();
+        try {
+            $objToDB->beginTransaction();
+            foreach ($rows as $row) {
+                $sql = 'INSERT INTO `user`
+                	( `uid`
+                	, `data`
+                	) VALUE
+                	( ' . $objToDB->quote($row['uid']) . '
+                	, ' . $objToDB->quote($row['data']) . '
+                	)
+        		';
+                $objToDB->query($sql);
+            }
+
+            $objFromDB->beginTransaction();
+            $objFromDB->query('DELETE FROM `user` WHERE uid = ' . DB::getInstance($uid)->quote($uid));
+            $objFromDB->commit();
+            $objToDB->commit();
+        } catch (Exception $e) {
+            $objFromDB->rollBack();
+            $objToDB->rollBack();
         }
-        DB::getInstance($uid)->query('DELETE FROM `user` WHERE uid = ' . DB::getInstance($uid)->quote($uid));
     }
 
     public function newUserDataProvider() {
