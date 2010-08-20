@@ -5,7 +5,9 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-class DB {
+require_once 'QueryBuilder.php';
+
+class DB extends QueryBuilder {
 
     /**
      *
@@ -573,7 +575,10 @@ class DB {
      * @throws Exception
      * @return DB
      */
-    public function query($sql) {
+    public function query($sql = null) {
+        if (!isset($sql)) {
+            $sql = $this->builder();
+        }
         $this->xconnect();
         if (!is_string($sql)) {
             throw new Exception();
@@ -665,7 +670,9 @@ class DB {
      * @return string
      */
     public function quote($value) {
-        if (is_int($value)) {
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        } else if (is_int($value)) {
             return (string)$value;
         } else if (is_float($value)) {
             return sprintf('%F', $value);

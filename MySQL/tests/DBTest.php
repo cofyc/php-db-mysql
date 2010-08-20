@@ -41,10 +41,6 @@ class DBTest extends PHPUnit_Framework_TestCase {
         DB::startDebug();
     }
 
-    public function tearDown() {
-        var_export(DB::endDebug());
-    }
-
     /**
      * @dataProvider newUserDataProvider
      */
@@ -144,7 +140,6 @@ class DBTest extends PHPUnit_Framework_TestCase {
     }
 
     public function testWarmUpIndexCacher() {
-        $stats = DB::warmUpIndexCache();
-        var_dump($stats);
+        DB::warmUpIndexCache();
     }
 }
