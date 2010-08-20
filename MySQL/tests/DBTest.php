@@ -142,4 +142,9 @@ class DBTest extends PHPUnit_Framework_TestCase {
 
         return $data;
     }
+
+    public function testWarmUpIndexCacher() {
+        $stats = DB::warmUpIndexCache();
+        var_dump($stats);
+    }
 }

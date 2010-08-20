@@ -27,6 +27,12 @@ class DB {
 
     /**
      *
+     * @var string
+     */
+    private $link_unique_key;
+
+    /**
+     *
      * @var mysqli
      */
     private $link;
@@ -36,13 +42,7 @@ class DB {
      *
      * @var array, array of mysqlis
      */
-    private static $links;
-
-    /**
-     *
-     * @var string
-     */
-    private $dsn;
+    private static $links = array();
 
     /**
      *
@@ -94,7 +94,7 @@ class DB {
 
     /**
      *
-     * @var mysqli
+     * @var DB
      */
     private static $objShardingMaster;
 
@@ -118,11 +118,34 @@ class DB {
 
     /**
      *
+     * @var integer
+     */
+    private static $queryNum = 0;
+
+    /**
+     *
+     * @var integer
+     */
+    private static $transactionNum = 0;
+
+    /**
+     *
      * @param string $dsn
      * @return DB
      */
     private function __construct($dsn) {
-        $this->dsn = $dsn;
+        $infos = self::parseDSN($dsn);
+        if (!$infos) {
+            throw new Exception('dsn format is wrong');
+        }
+
+        $this->host = $infos['host'];
+        $this->port = $infos['port'];
+        $this->username = $infos['username'];
+        $this->passwd = $infos['passwd'];
+        $this->dbname = $infos['dbname'];
+        $this->link_unique_key = $this->host . $this->port;
+
         return $this;
     }
 
@@ -189,11 +212,7 @@ class DB {
 
                 // try to read from index db
                 try {
-                    $result = self::$objShardingMaster->query("SELECT shard_id FROM index_user WHERE uid = " . (int)$shard_key);
-                    if (!$result) {
-                        throw new Exception('failed to get index');
-                    }
-                    $row = $result->fetch_assoc();
+                    $row = self::$objShardingMaster->query("SELECT shard_id FROM index_user WHERE uid = " . (int)$shard_key)->fetch();
                     if (!$row || !isset($row['shard_id'])) {
                         throw new Exception('failed to get shard id');
                     }
@@ -209,8 +228,10 @@ class DB {
                     	, ' . (int)$shard_id . '
                     	)
     				';
-                    if (!self::$objShardingMaster->query($sql)) {
-                        throw new Exception('query failed');
+                    try {
+                        self::$objShardingMaster->query($sql);
+                    } catch (Exception $e) {
+                        throw new Exception('failed to insert index');
                     }
                 }
 
@@ -316,8 +337,9 @@ class DB {
         self::xShardingMaster();
         self::xShardingIndexCacher();
 
-        $result = self::$objShardingMaster->query('SELECT uid, locked, shard_id FROM index_user');
-        if (!$result) {
+        try {
+            self::$objShardingMaster->query('SELECT uid, locked, shard_id FROM index_user');
+        } catch (Exception $e) {
             throw new Exception('faild to read index from db');
         }
 
@@ -327,7 +349,7 @@ class DB {
             'failed' => 0,
             'ignored' => 0
         );
-        while ($row = mysqli_fetch_assoc($result)) {
+        while ($row = self::$objShardingMaster->fetch()) {
             $stats['total']++;
             if ($row['locked']) {
                 $stats['ignored']++;
@@ -350,21 +372,8 @@ class DB {
      * @return void
      */
     private static function xShardingMaster() {
-        $infos = self::parseDSN(self::getConfig('master.dsn'));
-        if (!$infos) {
-            throw new Exception('master config is wrong');
-        }
-
         if (!isset(self::$objShardingMaster)) {
-            self::$objShardingMaster = self::_xconnect($infos['host'], $infos['port'], $infos['username'], $infos['passwd'], $infos['dbname']);
-            if (!self::$objShardingMaster) {
-                $objShardingMaster = null;
-                throw new Exception('cannot connect to master');
-            }
-        }
-
-        if (!self::$objShardingMaster->select_db($infos['dbname'])) {
-            throw new Exception(sprintf('cannot select to db (%s)', $infos['dbname']));
+            self::$objShardingMaster = new self(self::getConfig('master.dsn'));
         }
     }
 
@@ -408,7 +417,9 @@ class DB {
         	WHERE uid = ' . (int)$shard_key . '
         		&& locked = 0
         ';
-        if (!self::$objShardingMaster->query($sql)) {
+        try {
+            self::$objShardingMaster->query($sql);
+        } catch (Exception $e) {
             throw new Exception(sprintf('failed to lock shard_key (%d)', $shard_key));
         }
     }
@@ -437,7 +448,9 @@ class DB {
         	WHERE uid = ' . (int)$shard_key . '
         		&& locked = 1
 		';
-        if (!self::$objShardingMaster->query($sql)) {
+        try {
+        	self::$objShardingMaster->query($sql);
+        } catch (Exception $e) {
             throw new Exception(sprintf('failed to unlock shard_key (%d)', $shard_key));
         }
     }
@@ -471,7 +484,9 @@ class DB {
         	WHERE uid = ' . (int)$shard_key . '
         		&& locked = 1
 		';
-        if (!self::$objShardingMaster->query($sql)) {
+        try {
+        	self::$objShardingMaster->query($sql);
+        } catch (Exception $e) {
             throw new Exception(sprintf('failed to unlock shard_key (%d)', $shard_key));
         }
     }
@@ -483,6 +498,7 @@ class DB {
      */
     public static function setConfig($config) {
         if (!is_array($config)) {
+            // TODO more check code?
             throw new Exception();
         }
         self::$config = $config;
@@ -510,23 +526,13 @@ class DB {
     }
 
     /**
+     * X-Connector
      *
-     * @throws Exception, if we cannot connect to db
+     * @throws Exception
      * @return void
      */
     private function xconnect() {
-        $infos = self::parseDSN($this->dsn);
-        if (!$infos) {
-            throw new Exception('dsn format is wrong');
-        }
-
-        $this->host = $infos['host'];
-        $this->port = $infos['port'];
-        $this->username = $infos['username'];
-        $this->passwd = $infos['passwd'];
-        $this->dbname = $infos['dbname'];
-
-        $link = self::_xconnect($this->host, $this->port, $this->username, $this->passwd, $this->dbname);
+        $link = $this->_xconnect();
         if ($link === false) {
             throw new Exception();
         }
@@ -539,32 +545,24 @@ class DB {
     }
 
     /**
-     * DB connector with a connection pool.
      *
-     * @param string $host
-     * @param integer $port
-     * @param string $username
-     * @param string $passwd
-     * @param string $dbname
-     * @return mysqli, false on failure
+     * @return mysqli
      */
-    private static function _xconnect($host, $port, $username, $passwd, $dbname) {
-        $mysql_unique_id = $host . $port;
-
-        if (isset(self::$links[$mysql_unique_id])) {
-            return self::$links[$mysql_unique_id];
+    private function _xconnect() {
+        if (isset(self::$links[$this->link_unique_key])) {
+            return self::$links[$this->link_unique_key];
         }
 
         $link = new mysqli();
-        if (!$link->real_connect($host, $username, $passwd, $dbname, $port, null, MYSQLI_CLIENT_COMPRESS)) {
-            return false;
+        if (!$link->real_connect($this->host, $this->username, $this->passwd, $this->dbname, $this->port, null, MYSQLI_CLIENT_COMPRESS)) {
+            throw new Exception('db error (%d): %s', $link->connect_errno, $link->connect_error);
         }
 
-        if (!$link->set_charset(self::getConfig('master.charset', 'utf8'))) { // TODO 错误处理
-            return false;
+        if (!$link->set_charset(self::getConfig('master.charset', 'utf8'))) {
+            throw new Exception('db error (%d): %s', $link->errno, $link->error);
         }
 
-        self::$links[$mysql_unique_id] = $link;
+        self::$links[$this->link_unique_key] = $link;
 
         return $link;
     }
@@ -577,6 +575,9 @@ class DB {
      */
     public function query($sql) {
         $this->xconnect();
+        if (!is_string($sql)) {
+            throw new Exception();
+        }
         $result = $this->link->query($sql);
         if ($result === false) {
             throw new Exception('failed to query on db');
@@ -584,7 +585,6 @@ class DB {
         $this->sql = $sql;
         $this->result = $result;
         if (self::$debug) {
-            @self::$debug_infos[] = $sql;
         }
         return $this;
     }
@@ -604,10 +604,10 @@ class DB {
      */
     public function commit() {
         $this->xconnect();
-        $this->link->autocommit(true);
         if (!$this->link->commit()) {
             throw new Exception('failed to commit');
         }
+        $this->link->autocommit(true);
     }
 
     /**
@@ -616,10 +616,10 @@ class DB {
      */
     public function rollBack() {
         $this->xconnect();
-        $this->link->autocommit(true);
         if (!$this->link->rollback()) {
             throw new Exception('failed to rollback');
         }
+        $this->link->autocommit(true);
     }
 
     /**
@@ -630,8 +630,10 @@ class DB {
     public function fetch() {
         if ($this->result instanceof mysqli_result) {
             $row = $this->result->fetch_assoc();
-            $this->result->free();
-            $this->result = null;
+            if (!$row) {
+                $this->result->free();
+                $this->result = null;
+            }
             return $row;
         } else {
             throw new Exception('result is not a mysqli_result');
