@@ -5,9 +5,9 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-require_once 'QueryBuilder.php';
+require_once 'DBQueryBuilder.php';
 
-class DB extends QueryBuilder {
+class DB extends DBQueryBuilder {
 
     /**
      *

@@ -5,7 +5,7 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-abstract class QueryBuilder {
+abstract class DBQueryBuilder {
 
     const SELECT = 0;
 
@@ -60,7 +60,7 @@ abstract class QueryBuilder {
 
     /**
      *
-     * @return QueryBuilder
+     * @return DBQueryBuilder
      */
     public function select() {
         $this->type = self::SELECT;
@@ -84,7 +84,7 @@ abstract class QueryBuilder {
      *
      * @param string $table
      * @throws Exception
-     * @return QueryBuilder
+     * @return DBQueryBuilder
      */
     public function from($table) {
         if (!is_string($table) || empty($table)) {
@@ -96,7 +96,7 @@ abstract class QueryBuilder {
 
     /**
      *
-     * @return QueryBuilder
+     * @return DBQueryBuilder
      */
     public function where() {
         $args = func_get_args();

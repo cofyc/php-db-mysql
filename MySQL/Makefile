@@ -1,3 +1,3 @@
 
 all:
-	phpunit --bootstrap tests/bootstrap.php tests
+	phpunit --bootstrap bootstrap.php tests
