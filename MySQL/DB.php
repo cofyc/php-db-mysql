@@ -83,6 +83,12 @@ class DB extends DBQueryBuilder {
     private $result;
 
     /**
+     * Current shard cluster id.
+     * @var integer
+     */
+    private static $shard_cluster_id;
+
+    /**
      *
      * @var Memcached
      */
@@ -144,7 +150,7 @@ class DB extends DBQueryBuilder {
 
         // sharding
         try {
-            $shard = self::sharding($shard_key);
+            $shard = self::sharding($table, $shard_key);
         } catch (Exception $e) {
             throw $e;
         }
@@ -154,28 +160,36 @@ class DB extends DBQueryBuilder {
 
     /**
      *
+     * @param integer $shard_cluster_id
      * @param integer $shard_id
      * @throws Exception
      * @return DB
      */
-    public static function factoryByShardId($shard_id) {
+    public static function factoryByShardClusterIdAndShardId($shard_cluster_id, $shard_id) {
+        if (!is_int($shard_cluster_id)) {
+            throw new Exception();
+        }
         if (!is_int($shard_id)) {
             throw new Exception();
         }
-        $shards = self::getConfig('shards');
-        if (!isset($shards[$shard_id])) {
+        $sharding_clusters = self::getConfig('sharding.clusters');
+        if (!isset($sharding_clusters[$shard_cluster_id][$shard_id])) {
             throw new Exception();
         }
-        return new self($shards[$shard_id]['dsn']);
+        return new self($sharding_clusters[$shard_cluster_id][$shard_id]['dsn']);
     }
 
     /**
      *
+     * @param string $table
      * @param integer $shard_key
      * @throws Exception
      * @return array $shard
      */
-    private static function sharding($shard_key) {
+    private static function sharding($table, $shard_key) {
+        if (!is_string($table)) {
+            throw new Exception();
+        }
         if (!is_int($shard_key)) {
             throw new Exception();
         }
