@@ -102,30 +102,6 @@ class DB extends DBQueryBuilder {
 
     /**
      *
-     * @var boolean
-     */
-    private static $debug = false;
-
-    /**
-     *
-     * @var array
-     */
-    private static $debug_infos = array();
-
-    /**
-     *
-     * @var integer
-     */
-    private static $queryNum = 0;
-
-    /**
-     *
-     * @var integer
-     */
-    private static $transactionNum = 0;
-
-    /**
-     *
      * @param string $dsn
      * @return DB
      */
@@ -292,25 +268,6 @@ class DB extends DBQueryBuilder {
         }
         return self::$instances[$unique_key];
     }
-
-    /**
-     *
-     * @return boolean
-     */
-    public static function startDebug() {
-        self::$debug = true;
-        self::$debug_infos = array();
-    }
-
-    /**
-     *
-     * @return array
-     */
-    public static function endDebug() {
-        self::$debug = false;
-        return self::$debug_infos;
-    }
-
 
     /**
      *
@@ -492,39 +449,6 @@ class DB extends DBQueryBuilder {
         }
     }
 
-    /**
-     *
-     * @param array $config
-     * @throws Exception
-     */
-    public static function setConfig($config) {
-        if (!is_array($config)) {
-            // TODO more check code?
-            throw new Exception();
-        }
-        self::$config = $config;
-    }
-
-    /**
-     *
-     * @param string $name
-     * @param string | null $default, optional, defaults to null
-     */
-    private static function getConfig($name, $default = NULL) {
-        if (!is_string($name)) {
-            throw new Exception();
-        }
-        $sections = explode('.', $name);
-        $config = self::$config;
-        while ($section = array_shift($sections)) {
-            if (isset($config[$section])) {
-                $config = $config[$section];
-            } else {
-                return $default;
-            }
-        }
-        return $config;
-    }
 
     /**
      * X-Connector
@@ -559,7 +483,7 @@ class DB extends DBQueryBuilder {
             throw new Exception('db error (%d): %s', $link->connect_errno, $link->connect_error);
         }
 
-        if (!$link->set_charset(self::getConfig('master.charset', 'utf8'))) {
+        if (!$link->set_charset(self::getConfig('core.charset', 'utf8'))) {
             throw new Exception('db error (%d): %s', $link->errno, $link->error);
         }
 
@@ -589,8 +513,6 @@ class DB extends DBQueryBuilder {
         }
         $this->sql = $sql;
         $this->result = $result;
-        if (self::$debug) {
-        }
         return $this;
     }
 
@@ -728,5 +650,39 @@ class DB extends DBQueryBuilder {
             'passwd' => $infos['pass'],
             'dbname' => substr($infos['path'], 1)
         );
+    }
+
+	/**
+     *
+     * @param array $config
+     * @throws Exception
+     */
+    public static function setConfig($config) {
+        if (!is_array($config)) {
+            // TODO more check code?
+            throw new Exception();
+        }
+        self::$config = $config;
+    }
+
+    /**
+     *
+     * @param string $name
+     * @param string | null $default, optional, defaults to null
+     */
+    private static function getConfig($name, $default = NULL) {
+        if (!is_string($name)) {
+            throw new Exception();
+        }
+        $sections = explode('.', $name);
+        $config = self::$config;
+        while ($section = array_shift($sections)) {
+            if (isset($config[$section])) {
+                $config = $config[$section];
+            } else {
+                return $default;
+            }
+        }
+        return $config;
     }
 }
