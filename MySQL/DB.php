@@ -13,12 +13,6 @@ class DB extends DBQueryBuilder {
      *
      * @var DB
      */
-    private static $instance;
-
-    /**
-     *
-     * @var DB
-     */
     private static $instances = array();
 
     /**
@@ -153,20 +147,30 @@ class DB extends DBQueryBuilder {
 
     /**
      *
+     * @param string $table
      * @param integer $shard_key, optional
      * @throws Exception
      * @return DB
      */
-    private static function factory($shard_key = null) {
+    private static function factory($table, $shard_key = null) {
+        if (!is_string($table)) {
+            throw new Exception('table should be string');
+        }
+        foreach (self::getConfig('global', array()) as $dsn => $tables) {
+            if (in_array($table, $tables)) {
+                return new self($dsn);
+            }
+        }
+
         if (!isset($shard_key)) {
-            return new self(self::getConfig('global.master'));
+            throw new Exception('table is not in global tables, shard_key must be provided');
         }
 
         // sharding
         try {
             $shard = self::sharding($shard_key);
         } catch (Exception $e) {
-            throw new $e();
+            throw $e;
         }
 
         return new self($shard['dsn']);
@@ -276,22 +280,17 @@ class DB extends DBQueryBuilder {
 
     /**
      *
+     * @param string $table
      * @param integer $shard_key, optional
      * @throws Exception
      * @return DB
      */
-    public static function getInstance($shard_key = null) {
-        if (!isset($shard_key)) {
-            if (!isset(self::$instance)) {
-                self::$instance = self::factory();
-            }
-            return self::$instance;
+    public static function getInstance($table, $shard_key = null) {
+        $unique_key = sprintf('%s/%d', $table, $shard_key);
+        if (!isset(self::$instances[$unique_key])) {
+            self::$instances[$unique_key] = self::factory($table, $shard_key);
         }
-
-        if (!isset(self::$instances[$shard_key])) {
-            self::$instances[$shard_key] = self::factory($shard_key);
-        }
-        return self::$instances[$shard_key];
+        return self::$instances[$unique_key];
     }
 
     /**
@@ -585,6 +584,7 @@ class DB extends DBQueryBuilder {
         }
         $result = $this->link->query($sql);
         if ($result === false) {
+            var_dump($sql);die;
             throw new Exception('failed to query on db');
         }
         $this->sql = $sql;
@@ -625,6 +625,17 @@ class DB extends DBQueryBuilder {
             throw new Exception('failed to rollback');
         }
         $this->link->autocommit(true);
+    }
+
+    /**
+     *
+     * @throws Exception
+     * @return integer/string
+     * @see http://php.net/mysqli
+     */
+    public function lastInsertId() {
+        $this->xconnect();
+        return $this->link->insert_id;
     }
 
     /**

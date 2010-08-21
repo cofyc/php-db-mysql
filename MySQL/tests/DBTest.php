@@ -9,9 +9,11 @@ require_once '../MySQL/DB.php';
 
 $config = array(
     'global' => array(
-        'master' => 'mysql://root:root@127.0.0.1:3306/dbtest_global'
+        'mysql://root:root@127.0.0.1:3306/dbtest_global' => array(
+            'settings'
+        )
     ),
-	'master' => array(
+    'master' => array(
         'charset' => 'utf8',
         'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_index',
         'memcache_host' => '127.0.0.1',
@@ -42,10 +44,39 @@ class DBTest extends PHPUnit_Framework_TestCase {
     }
 
     /**
+     *
+     * @dataProvider settingDataProvider
+     */
+    public function testGlobalTables($table, $name, $value) {
+        $objDB = DB::getInstance($table);
+        $sql = 'INSERT INTO ' . $table . ' (name, value)
+        	VALUES
+        	( ' . $objDB->quote($name) . '
+        	, ' . $objDB->quote($value) . '
+        	)
+		';
+        $lastInsertedId = $objDB->query($sql)->lastInsertId();
+        $sql = "DELETE FROM " . $table . "
+        	WHERE id = " . $objDB->quote($lastInsertedId) . "
+		";
+        $objDB->query($sql);
+    }
+
+    public function settingDataProvider() {
+        $data = array();
+        $data[] = array(
+            'settings',
+            'asettingname',
+            'anysetingvalue',
+        );
+        return $data;
+    }
+
+    /**
      * @dataProvider newUserDataProvider
      */
     public function testNewInsertAndSelect($uid, $data) {
-        $objDB = DB::getInstance($uid);
+        $objDB = DB::getInstance('user', $uid);
         $sql = 'INSERT INTO `user`
         	( `uid`
         	, `data`
@@ -54,12 +85,12 @@ class DBTest extends PHPUnit_Framework_TestCase {
         	, ' . $objDB->quote($data) . '
         	)
 		';
-        $this->assertTrue(DB::getInstance($uid)->query($sql) instanceof DB);
+        $this->assertTrue($objDB->query($sql) instanceof DB);
         $sql = 'SELECT * FROM `user`
-        	WHERE `uid` = ' . DB::getInstance($uid)->quote($uid) . '
+        	WHERE `uid` = ' . $objDB->quote($uid) . '
         	LIMIT 1
         ';
-        $db = DB::getInstance($uid)->query($sql);
+        $db = $objDB->query($sql);
         $this->assertTrue($db instanceof DB);
         $row = $db->fetch();
         $this->assertTrue(is_array($row));
@@ -97,7 +128,7 @@ class DBTest extends PHPUnit_Framework_TestCase {
      * @throws Exception
      */
     private function transferUser($uid, $to) {
-        $objFromDB = DB::getInstance($uid);
+        $objFromDB = DB::getInstance('user', $uid);
         $tables = array(
             'user' => 'uid'
         );
@@ -118,7 +149,7 @@ class DBTest extends PHPUnit_Framework_TestCase {
                 $objToDB->query($sql);
             }
             $objFromDB->beginTransaction();
-            $objFromDB->query('DELETE FROM `user` WHERE uid = ' . DB::getInstance($uid)->quote($uid));
+            $objFromDB->query('DELETE FROM `user` WHERE uid = ' . $objFromDB->quote($uid));
             $objFromDB->commit();
             $objToDB->commit();
         } catch (Exception $e) {
