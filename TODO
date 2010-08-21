@@ -1,3 +1,1 @@
-MySQL
-  - Master-slave rw reparation
-  - a better transaction mechanism
+* test sharding clusters.

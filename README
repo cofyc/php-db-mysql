@@ -1,8 +1,5 @@
-Sample code demonstrating some db client wrapper implementations for common use.
+A php mysql db client wrapper implementations for common use.
 
-Implementations
-	* MySQL
-		master-slave rw reparation
-		sharding based on id
-	* Redis
-		sharding based on id
+    - Vertical partitioning by table.
+    - Horizontal sharding by table & userid.
+        Directory-based partitioning.

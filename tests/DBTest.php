@@ -5,7 +5,7 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-require_once '../MySQL/DB.php';
+require_once 'DB.php';
 
 class DBTest extends PHPUnit_Framework_TestCase {
 
