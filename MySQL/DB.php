@@ -23,12 +23,6 @@ class DB extends DBQueryBuilder {
 
     /**
      *
-     * @var string
-     */
-    private $link_unique_key;
-
-    /**
-     *
      * @var mysqli
      */
     private $link;
@@ -69,6 +63,13 @@ class DB extends DBQueryBuilder {
      * @var string
      */
     private $dbname;
+
+	/**
+     *
+     * @var string
+     */
+    private $link_key;
+
 
     /**
      *
@@ -122,7 +123,7 @@ class DB extends DBQueryBuilder {
         $this->username = $infos['username'];
         $this->passwd = $infos['passwd'];
         $this->dbname = $infos['dbname'];
-        $this->link_unique_key = $this->host . $this->port;
+        $this->link_key = $this->host . $this->port;
 
         return $this;
     }
@@ -194,11 +195,13 @@ class DB extends DBQueryBuilder {
             throw new Exception();
         }
 
-        $shards = self::getConfig('shards');
-        if (!is_array($shards)) {
+        $sharding_tables = self::getConfig('sharding.tables', array());
+        if (!isset($sharding_tables[$table])) {
             throw new Exception();
         }
+        self::$shard_cluster_id = $sharding_tables[$table];
 
+        $shards = self::getConfig(sprintf('sharding.clusters.%d', self::$shard_cluster_id), array());
         if (!isset(self::$shard_indices[$shard_key])) {
             self::xShardingIndexCacher();
 
@@ -215,7 +218,7 @@ class DB extends DBQueryBuilder {
                     $shard_id = (int)$row['shard_id'];
                 } catch (Exception $e) {
                     // or random allocates and stores it right now
-                    $shard_id = self::random_sharding($shards);
+                    $shard_id = self::randomSharding($shards);
                     $sql = 'INSERT INTO index_user
                     	( `uid`
                     	, `shard_id`
@@ -231,7 +234,7 @@ class DB extends DBQueryBuilder {
                     }
                 }
 
-                @self::$objShardingIndexCacher->set(self::getIndexCacheKey($shard_key), $shard_id, 60 * 60 * 24 * 30); // ignore this error
+                self::$objShardingIndexCacher->set(self::getIndexCacheKey($shard_key), $shard_id);
             }
 
             self::$shard_indices[$shard_key] = $shard_id;
@@ -250,7 +253,7 @@ class DB extends DBQueryBuilder {
      * @throws Exception
      * @return integer
      */
-    private static function random_sharding($shards) {
+    private static function randomSharding($shards) {
         if (!is_array($shards)) {
             throw new Exception();
         }
@@ -284,28 +287,18 @@ class DB extends DBQueryBuilder {
     }
 
     /**
-     *
-     * @param integer $shard_key
-     * @throws Exception
-     * @return string
-     */
-    private static function getIndexCacheKey($shard_key) {
-        if (!is_int($shard_key)) {
-            throw new Exception();
-        }
-        return sprintf('db/sharding/%d', $shard_key);
-    }
-
-    /**
      * Index Cache Warm-Up
      *
+     * @param integer $shard_cluster_id
      * @throws Exception
      * @return array
      * - total: integer
      * - cached: integer
      * - ignored: integer
      */
-    public static function warmUpIndexCache() {
+    public static function warmUpIndexCache($shard_cluster_id) {
+        self::$shard_cluster_id = $shard_cluster_id;
+
         self::xShardingMaster();
         self::xShardingIndexCacher();
 
@@ -319,16 +312,16 @@ class DB extends DBQueryBuilder {
             'total' => 0,
             'cached' => 0,
             'failed' => 0,
-            'ignored' => 0
+            'locaked' => 0
         );
         while ($row = self::$objShardingMaster->fetch()) {
             $stats['total']++;
             if ($row['locked']) {
-                $stats['ignored']++;
+                $stats['locaked']++;
                 continue;
             }
 
-            if (!self::$objShardingIndexCacher->set(self::getIndexCacheKey((int)$row['uid']), $row['shard_id'], 60 * 60 * 24 * 30)) {
+            if (!self::$objShardingIndexCacher->set(self::getIndexCacheKey((int)$row['uid']), $row['shard_id'])) {
                 $stats['failed']++;
             } else {
                 $stats['cached']++;
@@ -344,9 +337,19 @@ class DB extends DBQueryBuilder {
      * @return void
      */
     private static function xShardingMaster() {
-        if (!isset(self::$objShardingMaster)) {
-            self::$objShardingMaster = new self(self::getConfig('master.dsn'));
+        if (!isset(self::$shard_cluster_id)) {
+            throw new Exception();
         }
+        static $objs = array();
+        if (!isset($objs[self::$shard_cluster_id])) {
+            $shard_master = self::getConfig(sprintf('sharding.masters.%d', self::$shard_cluster_id));
+            if (!is_array($shard_master)) {
+                throw new Exception();
+            }
+            $objs[self::$shard_cluster_id] = new self($shard_master['dsn']);
+        }
+
+        self::$objShardingMaster = $objs[self::$shard_cluster_id];
     }
 
     /**
@@ -355,114 +358,22 @@ class DB extends DBQueryBuilder {
      * @return void
      */
     private static function xShardingIndexCacher() {
-        if (self::$objShardingIndexCacher) {
-            return;
-        }
-        self::$objShardingIndexCacher = new Memcached();
-        if (!self::$objShardingIndexCacher->addServer(self::getConfig('master.memcache_host'), self::getConfig('master.memcache_port'))) {
-            self::$objShardingIndexCacher = null;
-            throw new Exception('failed to add cache server');
-        }
-    }
-
-    /**
-     * Start a sharding transfer transaction.
-     * @param integer $shard_key
-     * @throws Exception
-     */
-    public static function startTransfer($shard_key) {
-        if (!is_int($shard_key)) {
+        if (!isset(self::$shard_cluster_id)) {
             throw new Exception();
         }
-
-        self::xShardingIndexCacher();
-        self::xShardingMaster();
-
-        if (!self::$objShardingIndexCacher->delete(self::getIndexCacheKey($shard_key))) {
-            if (self::$objShardingIndexCacher->getResultCode() !== Memcached::RES_NOTFOUND) {
+        static $objs = array();
+        if (!isset($objs[self::$shard_cluster_id])) {
+            $obj = new Memcached();
+            $shard_master = self::getConfig(sprintf('sharding.masters.%d', self::$shard_cluster_id));
+            if (!is_array($shard_master)) {
                 throw new Exception();
             }
+            $obj->addServer($shard_master['memcache_host'], $shard_master['memcache_port']);
+            $objs[self::$shard_cluster_id] = $obj;
         }
 
-        $sql = 'UPDATE index_user
-        	SET locked = 1
-        	WHERE uid = ' . (int)$shard_key . '
-        		&& locked = 0
-        ';
-        try {
-            self::$objShardingMaster->query($sql);
-        } catch (Exception $e) {
-            throw new Exception(sprintf('failed to lock shard_key (%d)', $shard_key));
-        }
+        self::$objShardingIndexCacher = $objs[self::$shard_cluster_id];
     }
-
-    /**
-     *
-     * @param integer $shard_key
-     * @throws Exception
-     */
-    public static function resetTransfer($shard_key) {
-        if (!is_int($shard_key)) {
-            throw new Exception();
-        }
-
-        self::xShardingIndexCacher();
-        self::xShardingMaster();
-
-        if (!self::$objShardingIndexCacher->delete(self::getIndexCacheKey($shard_key))) {
-            if (self::$objShardingIndexCacher->getResultCode() !== Memcached::RES_NOTFOUND) {
-                throw new Exception();
-            }
-        }
-
-        $sql = 'UPDATE index_user
-        	SET locked = 0
-        	WHERE uid = ' . (int)$shard_key . '
-        		&& locked = 1
-		';
-        try {
-        	self::$objShardingMaster->query($sql);
-        } catch (Exception $e) {
-            throw new Exception(sprintf('failed to unlock shard_key (%d)', $shard_key));
-        }
-    }
-
-    /**
-     *
-     * @param integer $shard_key
-     * @param integer $shard_id
-     * @throws Exception
-     */
-    public static function endTransfer($shard_key, $shard_id) {
-        if (!is_int($shard_key)) {
-            throw new Exception();
-        }
-
-        if (!is_int($shard_id)) {
-            throw new Exception();
-        }
-
-        self::xShardingIndexCacher();
-        self::xShardingMaster();
-
-        if (!self::$objShardingIndexCacher->delete(self::getIndexCacheKey($shard_key))) {
-            if (self::$objShardingIndexCacher->getResultCode() !== Memcached::RES_NOTFOUND) {
-                throw new Exception();
-            }
-        }
-
-        $sql = 'UPDATE index_user
-        	SET locked = 0, shard_id = ' . (int)$shard_id . '
-        	WHERE uid = ' . (int)$shard_key . '
-        		&& locked = 1
-		';
-        try {
-        	self::$objShardingMaster->query($sql);
-        } catch (Exception $e) {
-            throw new Exception(sprintf('failed to unlock shard_key (%d)', $shard_key));
-        }
-    }
-
 
     /**
      * X-Connector
@@ -488,8 +399,8 @@ class DB extends DBQueryBuilder {
      * @return mysqli
      */
     private function _xconnect() {
-        if (isset(self::$links[$this->link_unique_key])) {
-            return self::$links[$this->link_unique_key];
+        if (isset(self::$links[$this->link_key])) {
+            return self::$links[$this->link_key];
         }
 
         $link = new mysqli();
@@ -501,7 +412,7 @@ class DB extends DBQueryBuilder {
             throw new Exception('db error (%d): %s', $link->errno, $link->error);
         }
 
-        self::$links[$this->link_unique_key] = $link;
+        self::$links[$this->link_key] = $link;
 
         return $link;
     }
@@ -522,7 +433,6 @@ class DB extends DBQueryBuilder {
         }
         $result = $this->link->query($sql);
         if ($result === false) {
-            var_dump($sql);die;
             throw new Exception('failed to query on db');
         }
         $this->sql = $sql;
@@ -666,7 +576,7 @@ class DB extends DBQueryBuilder {
         );
     }
 
-	/**
+    /**
      *
      * @param array $config
      * @throws Exception
@@ -698,5 +608,18 @@ class DB extends DBQueryBuilder {
             }
         }
         return $config;
+    }
+
+    /**
+     *
+     * @param integer $shard_key
+     * @throws Exception
+     * @return string
+     */
+    private static function getIndexCacheKey($shard_key) {
+        if (!is_int($shard_key)) {
+            throw new Exception();
+        }
+        return sprintf('db/sharding/%d', self::$shard_cluster_id, $shard_key);
     }
 }
