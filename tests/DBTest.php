@@ -26,11 +26,12 @@ class DBTest extends PHPUnit_Framework_TestCase {
         	, ' . $objDB->quote($value) . '
         	)
 		';
-        $lastInsertedId = $objDB->query($sql)->lastInsertId();
+        $this->assertTrue($objDB->exec($sql) === 1);
+        $lastInsertedId = $objDB->lastInsertId();
         $sql = "DELETE FROM " . $table . "
         	WHERE id = " . $objDB->quote($lastInsertedId) . "
 		";
-        $objDB->query($sql);
+        $this->assertTrue($objDB->exec($sql) === 1);
     }
 
     public function settingDataProvider() {
@@ -43,32 +44,6 @@ class DBTest extends PHPUnit_Framework_TestCase {
         return $data;
     }
 
-    /**
-     * @dataProvider newUserDataProvider
-     */
-    public function testNewInsertAndSelect($uid, $data) {
-        $objDB = DB::getInstanceByTableAndShardKey('user', $uid);
-        $sql = 'INSERT INTO `user`
-        	( `uid`
-        	, `data`
-        	) VALUE
-        	( ' . $objDB->quote($uid) . '
-        	, ' . $objDB->quote($data) . '
-        	)
-		';
-        $this->assertTrue($objDB->query($sql) instanceof DB);
-        $sql = 'SELECT * FROM `user`
-        	WHERE `uid` = ' . $objDB->quote($uid) . '
-        	LIMIT 1
-        ';
-        $db = $objDB->query($sql);
-        $this->assertTrue($db instanceof DB);
-        $row = $db->fetch();
-        $this->assertTrue(is_array($row));
-        $this->assertTrue((int)$row['uid'] === $uid);
-        $this->assertTrue($row['data'] === $data);
-    }
-
     public function newUserDataProvider() {
         $data = array();
         for ($i = 0; $i < 100; $i++) {
@@ -77,14 +52,6 @@ class DBTest extends PHPUnit_Framework_TestCase {
                 sha1(mt_rand())
             );
         }
-
         return $data;
-    }
-
-    public function testWarmUpIndexCacher() {
-        $stats = DB::warmUpIndexCache(1);
-        var_dump($stats);
-//        $stats = DB::warmUpIndexCache(2);
-//        var_dump($stats);
     }
 }
