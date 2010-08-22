@@ -18,7 +18,7 @@ class DBQueryBuilderTest extends PHPUnit_Framework_TestCase {
     public function setUp() {
         global $config;
         DB::setConfig($config);
-        $this->objDB = DB::factoryByShardClusterIdAndShardId(1, 1);
+        $this->objDB = DB::getInstanceByShardClusterIDAndShardID(1, 1);
     }
 
     public function tearDown() {

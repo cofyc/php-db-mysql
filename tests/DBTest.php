@@ -19,7 +19,7 @@ class DBTest extends PHPUnit_Framework_TestCase {
      * @dataProvider settingDataProvider
      */
     public function testGlobalTables($table, $name, $value) {
-        $objDB = DB::getInstance($table);
+        $objDB = DB::getInstanceByTableAndShardKey($table);
         $sql = 'INSERT INTO ' . $table . ' (name, value)
         	VALUES
         	( ' . $objDB->quote($name) . '
@@ -47,7 +47,7 @@ class DBTest extends PHPUnit_Framework_TestCase {
      * @dataProvider newUserDataProvider
      */
     public function testNewInsertAndSelect($uid, $data) {
-        $objDB = DB::getInstance('user', $uid);
+        $objDB = DB::getInstanceByTableAndShardKey('user', $uid);
         $sql = 'INSERT INTO `user`
         	( `uid`
         	, `data`

@@ -5,8 +5,8 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-define('CO_ROOT_PATH', realpath(dirname(__FILE__) . '/../'));
-set_include_path(CO_ROOT_PATH . ':' . get_include_path());
+define('DB_INCLUDE_PATH', realpath(dirname(__FILE__) . '/src'));
+set_include_path(DB_INCLUDE_PATH . ':' . get_include_path());
 
 $config = array(
     'core' => array(
@@ -22,10 +22,12 @@ $config = array(
             'user' => 1
         ),
         'masters' => array(
-            1 => array(
-                'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_index',
-                'memcache_host' => '127.0.0.1',
-                'memcache_port' => 11211
+            1 => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_index'
+        ),
+        'memcaches' => array(
+            array(
+                '127.0.0.1',
+                11211
             )
         ),
         'clusters' => array(

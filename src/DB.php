@@ -5,13 +5,13 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-require_once 'DBQueryBuilder.php';
+require_once 'DB/DBQueryBuilder.php';
 
 class DB extends DBQueryBuilder {
 
     /**
      *
-     * @var DB
+     * @var array
      */
     private static $instances = array();
 
@@ -64,12 +64,11 @@ class DB extends DBQueryBuilder {
      */
     private $dbname;
 
-	/**
+    /**
      *
      * @var string
      */
     private $link_key;
-
 
     /**
      *
@@ -110,6 +109,7 @@ class DB extends DBQueryBuilder {
     /**
      *
      * @param string $dsn
+     * @throws Exception
      * @return DB
      */
     private function __construct($dsn) {
@@ -130,12 +130,22 @@ class DB extends DBQueryBuilder {
 
     /**
      *
+     * @param string $dsn
+     * @throws Exception
+     * @return DB
+     */
+    private static function factoryByDSN($dsn) {
+        return new self($dsn);
+    }
+
+    /**
+     *
      * @param string $table
      * @param integer $shard_key, optional
      * @throws Exception
      * @return DB
      */
-    private static function factory($table, $shard_key = null) {
+    private static function factoryByTableAndShardKey($table, $shard_key = null) {
         if (!is_string($table)) {
             throw new Exception('table should be string');
         }
@@ -166,7 +176,7 @@ class DB extends DBQueryBuilder {
      * @throws Exception
      * @return DB
      */
-    public static function factoryByShardClusterIdAndShardId($shard_cluster_id, $shard_id) {
+    private static function factoryByShardClusterIDAndShardID($shard_cluster_id, $shard_id) {
         if (!is_int($shard_cluster_id)) {
             throw new Exception();
         }
@@ -178,6 +188,57 @@ class DB extends DBQueryBuilder {
             throw new Exception();
         }
         return new self($sharding_clusters[$shard_cluster_id][$shard_id]['dsn']);
+    }
+
+    /**
+     *
+     * @param string $dsn
+     * @throws Exception
+     * @return DB
+     */
+    public static function getInstanceByDSN($dsn) {
+        return self::getInstance('factoryByDSN', $dsn);
+    }
+
+    /**
+     *
+     * @param string $table
+     * @param integer $shard_key, optional
+     * @throws Exception
+     * @return DB
+     */
+    public static function getInstanceByTableAndShardKey($table, $shard_key = null) {
+        return self::getInstance('factoryByTableAndShardKey', $table, $shard_key);
+    }
+
+    /**
+     *
+     * @param integer $shard_cluster_id
+     * @param integer $shard_id
+     * @throws Exception
+     * @return DB
+     */
+    public static function getInstanceByShardClusterIDAndShardID($shard_cluster_id, $shard_id) {
+        return self::getInstance('factoryByShardClusterIDAndShardID', $shard_cluster_id, $shard_id);
+    }
+
+    /**
+     *
+     * @param string $factory
+     * @param $...
+     * @return DB
+     */
+    private static function getInstance($factory) {
+        $args = func_get_args();
+        array_shift($args);
+        $args_serialized = serialize($args);
+        if (!isset(self::$instances[$factory][$args_serialized])) {
+            self::$instances[$factory][$args_serialized] = call_user_func_array(array(
+                'DB',
+                $factory
+            ), $args);
+        }
+        return self::$instances[$factory][$args_serialized];
     }
 
     /**
@@ -272,21 +333,6 @@ class DB extends DBQueryBuilder {
     }
 
     /**
-     *
-     * @param string $table
-     * @param integer $shard_key, optional
-     * @throws Exception
-     * @return DB
-     */
-    public static function getInstance($table, $shard_key = null) {
-        $unique_key = sprintf('%s/%d', $table, $shard_key);
-        if (!isset(self::$instances[$unique_key])) {
-            self::$instances[$unique_key] = self::factory($table, $shard_key);
-        }
-        return self::$instances[$unique_key];
-    }
-
-    /**
      * Index Cache Warm-Up
      *
      * @param integer $shard_cluster_id
@@ -337,19 +383,11 @@ class DB extends DBQueryBuilder {
      * @return void
      */
     private static function xShardingMaster() {
-        if (!isset(self::$shard_cluster_id)) {
+        if (!self::$shard_cluster_id) {
             throw new Exception();
         }
-        static $objs = array();
-        if (!isset($objs[self::$shard_cluster_id])) {
-            $shard_master = self::getConfig(sprintf('sharding.masters.%d', self::$shard_cluster_id));
-            if (!is_array($shard_master)) {
-                throw new Exception();
-            }
-            $objs[self::$shard_cluster_id] = new self($shard_master['dsn']);
-        }
-
-        self::$objShardingMaster = $objs[self::$shard_cluster_id];
+        $dsn = self::getConfig(sprintf('sharding.masters.%d', self::$shard_cluster_id));
+        self::$objShardingMaster = DB::getInstanceByDSN($dsn);
     }
 
     /**
@@ -358,21 +396,14 @@ class DB extends DBQueryBuilder {
      * @return void
      */
     private static function xShardingIndexCacher() {
-        if (!isset(self::$shard_cluster_id)) {
-            throw new Exception();
-        }
-        static $objs = array();
-        if (!isset($objs[self::$shard_cluster_id])) {
+        if (!isset(self::$objShardingIndexCacher)) {
             $obj = new Memcached();
-            $shard_master = self::getConfig(sprintf('sharding.masters.%d', self::$shard_cluster_id));
-            if (!is_array($shard_master)) {
+            if ($obj->addServers(self::getConfig('sharding.memcaches', array())) && $obj->setOption(Memcached::OPT_BINARY_PROTOCOL, true)) {
+                self::$objShardingIndexCacher = $obj;
+            } else {
                 throw new Exception();
             }
-            $obj->addServer($shard_master['memcache_host'], $shard_master['memcache_port']);
-            $objs[self::$shard_cluster_id] = $obj;
         }
-
-        self::$objShardingIndexCacher = $objs[self::$shard_cluster_id];
     }
 
     /**
