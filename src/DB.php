@@ -257,7 +257,10 @@ class DB extends DBQueryBuilder {
             if ($shard_id === false) {
                 $objShardingMaster = DB::getInstanceByDSN(self::getConfig(sprintf('sharding.masters.%d', $cluster_id)));
 
-                $row = $objShardingMaster->query("SELECT shard_id, locked FROM index_user WHERE uid = " . (int)$shard_key)->fetch();
+                $row = $objShardingMaster->select('shard_id', 'locked')->from('shard_index')->where(array(
+                    'shard_key' => $shard_key
+                ))->query()->fetch();
+
                 if ($row) {
                     if ($row['locked']) {
                         throw new Exception(sprintf('shard key %d is locked', $shard_key));
@@ -265,8 +268,8 @@ class DB extends DBQueryBuilder {
                     $shard_id = (int)$row['shard_id'];
                 } else {
                     $shard_id = self::randAllocate($shards);
-                    $sql = 'INSERT INTO index_user
-                        ( `uid`
+                    $sql = 'INSERT INTO shard_index
+                        ( `shard_key`
                         , `shard_id`
                         ) VALUE
                         ( ' . (int)$shard_key . '
@@ -348,7 +351,7 @@ class DB extends DBQueryBuilder {
             $objShardingMaster = DB::getInstanceByDSN($dsn);
 
             try {
-                $objShardingMaster->query('SELECT uid, locked, shard_id FROM index_user');
+                $objShardingMaster->select()->from('shard_index')->query();
             } catch (Exception $e) {
                 throw new Exception('faild to read index from db');
             }
@@ -360,7 +363,7 @@ class DB extends DBQueryBuilder {
                     continue;
                 }
 
-                if (!self::$objShardingIndexCacher->set(self::getIndexCacheKey($cluster_id, (int)$row['uid']), $row['shard_id'])) {
+                if (!self::$objShardingIndexCacher->set(self::getIndexCacheKey($cluster_id, (int)$row['shard_key']), $row['shard_id'])) {
                     $_stats['failed']++;
                 } else {
                     $_stats['cached']++;
@@ -446,7 +449,7 @@ class DB extends DBQueryBuilder {
         }
         $result = $this->link->query($sql);
         if ($result === false) {
-            throw new Exception('failed to query on db');
+            throw new Exception(sprintf('query (%d): %s', $this->link->errno, $this->link->error));
         }
         $this->sql = $sql;
         $this->result = $result;

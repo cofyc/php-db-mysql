@@ -26,5 +26,7 @@ class DBQueryBuilderTest extends PHPUnit_Framework_TestCase {
 
     public function test() {
         $this->objDB->select()->from('user')->where('uid', 1234)->query();
+        $this->objDB->select()->from('user')->where(array('uid' => 1234))->query();
+        $this->objDB->select('uid')->from('user')->where(array('uid' => 1234))->query();
     }
 }

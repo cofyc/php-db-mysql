@@ -55,7 +55,19 @@ abstract class DBQueryBuilder {
         } else {
             throw new Exception();
         }
+        $this->reset();
         return $sql;
+    }
+
+    /**
+     *
+     * @return void
+     */
+    public function reset() {
+        $this->select = array();
+        unset($this->from);
+        $this->where = array();
+        unset($this->type);
     }
 
     /**
@@ -63,6 +75,7 @@ abstract class DBQueryBuilder {
      * @return DB
      */
     public function select() {
+        $this->reset();
         $this->type = self::SELECT;
         if (func_num_args() > 0) {
             $args = func_get_args();
@@ -102,8 +115,8 @@ abstract class DBQueryBuilder {
         $args = func_get_args();
         if (func_num_args() === 2) {
             $this->where[$args[0]] = $args[1];
-        } else if (func_num_args() === 1 && $args[0]) {
-            $this->where = array_merge($this->where, $args);
+        } else if (func_num_args() === 1 && is_array($args[0])) {
+            $this->where = array_merge($this->where, $args[0]);
         } else {
             throw new Exception();
         }
