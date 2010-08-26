@@ -33,15 +33,15 @@ $config = array(
         'clusters' => array(
             1 => array(
                 1 => array(
-                    'weight' => '10',
+                    'weight' => 10,
                     'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_1'
                 ),
                 2 => array(
-                    'weight' => '0',
+                    'weight' => 0,
                     'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_2'
                 ),
                 3 => array(
-                    'weight' => '30',
+                    'weight' => 30,
                     'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_3'
                 )
             )

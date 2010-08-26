@@ -11,7 +11,7 @@ class DBTest extends PHPUnit_Framework_TestCase {
 
     public function setUp() {
         global $config;
-        DB::setConfig($config);
+
     }
 
     /**

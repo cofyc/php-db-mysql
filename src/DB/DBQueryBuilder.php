@@ -60,7 +60,7 @@ abstract class DBQueryBuilder {
 
     /**
      *
-     * @return DBQueryBuilder
+     * @return DB
      */
     public function select() {
         $this->type = self::SELECT;
@@ -84,7 +84,7 @@ abstract class DBQueryBuilder {
      *
      * @param string $table
      * @throws Exception
-     * @return DBQueryBuilder
+     * @return DB
      */
     public function from($table) {
         if (!is_string($table) || empty($table)) {
@@ -96,7 +96,7 @@ abstract class DBQueryBuilder {
 
     /**
      *
-     * @return DBQueryBuilder
+     * @return DB
      */
     public function where() {
         $args = func_get_args();

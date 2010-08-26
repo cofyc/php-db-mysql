@@ -83,22 +83,10 @@ class DB extends DBQueryBuilder {
     private $result;
 
     /**
-     * Current shard cluster id.
-     * @var integer
-     */
-    private static $shard_cluster_id;
-
-    /**
      *
      * @var Memcached
      */
     private static $objShardingIndexCacher;
-
-    /**
-     *
-     * @var DB
-     */
-    private static $objShardingMaster;
 
     /**
      *
@@ -256,46 +244,43 @@ class DB extends DBQueryBuilder {
             throw new Exception();
         }
 
-        $sharding_tables = self::getConfig('sharding.tables', array());
-        if (!isset($sharding_tables[$table])) {
-            throw new Exception();
+        $cluster_id = self::getConfig(sprintf('sharding.tables.%s', $table));
+        if (!isset($cluster_id)) {
+            throw new Exception('table does not exist in sharding cluster');
         }
-        self::$shard_cluster_id = $sharding_tables[$table];
 
-        $shards = self::getConfig(sprintf('sharding.clusters.%d', self::$shard_cluster_id), array());
+        $shards = self::getConfig(sprintf('sharding.clusters.%d', $cluster_id), array());
         if (!isset(self::$shard_indices[$shard_key])) {
             self::xShardingIndexCacher();
 
-            $shard_id = self::$objShardingIndexCacher->get(self::getIndexCacheKey($shard_key));
+            $shard_id = self::$objShardingIndexCacher->get(self::getIndexCacheKey($cluster_id, $shard_key));
             if ($shard_id === false) {
-                self::xShardingMaster();
+                $objShardingMaster = DB::getInstanceByDSN(self::getConfig(sprintf('sharding.masters.%d', $cluster_id)));
 
-                // try to read from index db
-                try {
-                    $row = self::$objShardingMaster->query("SELECT shard_id FROM index_user WHERE uid = " . (int)$shard_key)->fetch();
-                    if (!$row || !isset($row['shard_id'])) {
-                        throw new Exception('failed to get shard id');
+                $row = $objShardingMaster->query("SELECT shard_id, locked FROM index_user WHERE uid = " . (int)$shard_key)->fetch();
+                if ($row) {
+                    if ($row['locked']) {
+                        throw new Exception(sprintf('shard key %d is locked', $shard_key));
                     }
                     $shard_id = (int)$row['shard_id'];
-                } catch (Exception $e) {
-                    // or random allocates and stores it right now
-                    $shard_id = self::randomSharding($shards);
+                } else {
+                    $shard_id = self::randAllocate($shards);
                     $sql = 'INSERT INTO index_user
-                    	( `uid`
-                    	, `shard_id`
-                    	) VALUE
-                    	( ' . (int)$shard_key . '
-                    	, ' . (int)$shard_id . '
-                    	)
-    				';
+                        ( `uid`
+                        , `shard_id`
+                        ) VALUE
+                        ( ' . (int)$shard_key . '
+                        , ' . (int)$shard_id . '
+                        )
+                    ';
                     try {
-                        self::$objShardingMaster->query($sql);
+                        $objShardingMaster->query($sql);
                     } catch (Exception $e) {
                         throw new Exception('failed to insert index');
                     }
                 }
 
-                self::$objShardingIndexCacher->set(self::getIndexCacheKey($shard_key), $shard_id);
+                self::$objShardingIndexCacher->set(self::getIndexCacheKey($cluster_id, $shard_key), $shard_id);
             }
 
             self::$shard_indices[$shard_key] = $shard_id;
@@ -314,7 +299,7 @@ class DB extends DBQueryBuilder {
      * @throws Exception
      * @return integer
      */
-    private static function randomSharding($shards) {
+    private static function randAllocate($shards) {
         if (!is_array($shards)) {
             throw new Exception();
         }
@@ -335,59 +320,56 @@ class DB extends DBQueryBuilder {
     /**
      * Index Cache Warm-Up
      *
-     * @param integer $shard_cluster_id
      * @throws Exception
      * @return array
      * - total: integer
      * - cached: integer
-     * - ignored: integer
+     * - failed: integer
+     * - locked: integer
      */
-    public static function warmUpIndexCache($shard_cluster_id) {
-        self::$shard_cluster_id = $shard_cluster_id;
+    public static function warmUpIndexCache() {
+        $stats = array();
 
-        self::xShardingMaster();
-        self::xShardingIndexCacher();
-
-        try {
-            self::$objShardingMaster->query('SELECT uid, locked, shard_id FROM index_user');
-        } catch (Exception $e) {
-            throw new Exception('faild to read index from db');
-        }
-
-        $stats = array(
-            'total' => 0,
-            'cached' => 0,
-            'failed' => 0,
-            'locaked' => 0
-        );
-        while ($row = self::$objShardingMaster->fetch()) {
-            $stats['total']++;
-            if ($row['locked']) {
-                $stats['locaked']++;
-                continue;
-            }
-
-            if (!self::$objShardingIndexCacher->set(self::getIndexCacheKey((int)$row['uid']), $row['shard_id'])) {
-                $stats['failed']++;
-            } else {
-                $stats['cached']++;
-            }
-        }
-
-        return $stats;
-    }
-
-    /**
-     *
-     * @throws Exception
-     * @return void
-     */
-    private static function xShardingMaster() {
-        if (!self::$shard_cluster_id) {
+        $masters = self::getConfig('sharding.masters');
+        if (!isset($masters)) {
             throw new Exception();
         }
-        $dsn = self::getConfig(sprintf('sharding.masters.%d', self::$shard_cluster_id));
-        self::$objShardingMaster = DB::getInstanceByDSN($dsn);
+
+        self::xShardingIndexCacher();
+
+        foreach ($masters as $cluster_id => $dsn) {
+            $_stats = array(
+                'total' => 0,
+                'cached' => 0,
+                'failed' => 0,
+                'locked' => 0
+            );
+
+            $objShardingMaster = DB::getInstanceByDSN($dsn);
+
+            try {
+                $objShardingMaster->query('SELECT uid, locked, shard_id FROM index_user');
+            } catch (Exception $e) {
+                throw new Exception('faild to read index from db');
+            }
+
+            while ($row = $objShardingMaster->fetch()) {
+                $_stats['total']++;
+                if ($row['locked']) {
+                    $_stats['locked']++;
+                    continue;
+                }
+
+                if (!self::$objShardingIndexCacher->set(self::getIndexCacheKey($cluster_id, (int)$row['uid']), $row['shard_id'])) {
+                    $_stats['failed']++;
+                } else {
+                    $_stats['cached']++;
+                }
+            }
+
+            $stats[$cluster_id] = $_stats;
+        }
+        return $stats;
     }
 
     /**
@@ -473,11 +455,29 @@ class DB extends DBQueryBuilder {
 
     /**
      *
+     * @return boolean
+     */
+    public function close() {
+        if (!isset($this->link)) {
+            return true;
+        }
+        if ($this->link->close() === false) {
+            return false;
+        }
+        unset($this->link);
+        unset(self::$links[$this->link_key]);
+        return true;
+    }
+
+    /**
+     *
      * @throws Exception
      */
     public function beginTransaction() {
         $this->xconnect();
-        $this->link->autocommit(false);
+        if (!$this->link->autocommit(false)) {
+            throw new Exception();
+        }
     }
 
     /**
@@ -489,7 +489,9 @@ class DB extends DBQueryBuilder {
         if (!$this->link->commit()) {
             throw new Exception('failed to commit');
         }
-        $this->link->autocommit(true);
+        if (!$this->link->autocommit(true)) {
+            throw new Exception();
+        }
     }
 
     /**
@@ -501,7 +503,9 @@ class DB extends DBQueryBuilder {
         if (!$this->link->rollback()) {
             throw new Exception('failed to rollback');
         }
-        $this->link->autocommit(true);
+        if (!$this->link->autocommit(true)) {
+            throw new Exception();
+        }
     }
 
     /**
@@ -584,7 +588,7 @@ class DB extends DBQueryBuilder {
 
         $this->xconnect();
 
-        return mysqli_real_escape_string($this->link, $value);
+        return $this->link->real_escape_string($value);
     }
 
     /**
@@ -614,7 +618,9 @@ class DB extends DBQueryBuilder {
      */
     public static function setConfig($config) {
         if (!is_array($config)) {
-            // TODO more check code?
+            throw new Exception();
+        }
+        if (!isset($config['core'])) {
             throw new Exception();
         }
         self::$config = $config;
@@ -623,7 +629,7 @@ class DB extends DBQueryBuilder {
     /**
      *
      * @param string $name
-     * @param string | null $default, optional, defaults to null
+     * @param mixed $default, optional, defaults to null
      */
     private static function getConfig($name, $default = NULL) {
         if (!is_string($name)) {
@@ -643,14 +649,18 @@ class DB extends DBQueryBuilder {
 
     /**
      *
+     * @param integer $cluster_id
      * @param integer $shard_key
      * @throws Exception
      * @return string
      */
-    private static function getIndexCacheKey($shard_key) {
+    private static function getIndexCacheKey($cluster_id, $shard_key) {
+        if (!is_int($cluster_id)) {
+            throw new Exception();
+        }
         if (!is_int($shard_key)) {
             throw new Exception();
         }
-        return sprintf('db/sharding/%d', self::$shard_cluster_id, $shard_key);
+        return sprintf('db/sharding/%d/%d', $cluster_id, $shard_key);
     }
 }
