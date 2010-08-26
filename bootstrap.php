@@ -13,7 +13,7 @@ $config = array(
         'charset' => 'utf8'
     ),
     'global' => array(
-        'sqlite:/tmp/db_global.sq3' => array(
+        'mysql://root:root@127.0.0.1:3306/dbtest_global' => array(
             'settings'
         )
     ),
@@ -22,7 +22,7 @@ $config = array(
             'user' => 1
         ),
         'masters' => array(
-            1 => 'sqlite:/tmp/db_shard_master.sq3'
+            1 => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_index'
         ),
         'memcaches' => array(
             array(
@@ -34,21 +34,17 @@ $config = array(
             1 => array(
                 1 => array(
                     'weight' => '10',
-                    'dsn' => 'sqlite:/tmp/db_shard_1.sq3'
+                    'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_1'
                 ),
                 2 => array(
                     'weight' => '0',
-                    'dsn' => 'sqlite:/tmp/db_shard_2.sq3'
+                    'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_2'
                 ),
                 3 => array(
                     'weight' => '30',
-                    'dsn' => 'sqlite:/tmp/db_shard_3.sq3'
+                    'dsn' => 'mysql://root:root@127.0.0.1:3306/dbtest_shard_3'
                 )
             )
         )
     )
 );
-
-
-// CREATE TABLE settings (id INTEGER PRIMARY KEY, name, value);
-//
