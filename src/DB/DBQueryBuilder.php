@@ -2,10 +2,18 @@
 /**
  * A simple SQL Query Builder.
  *
+ * DML
+ * * SELECT
+ * * INSERT
+ * * UPDATE
+ * * DELETE
+ *
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
 abstract class DBQueryBuilder {
+
+    const INVALID = -1;
 
     const SELECT = 0;
 
@@ -15,13 +23,41 @@ abstract class DBQueryBuilder {
 
     const INSERT = 3;
 
+    /**
+     *
+     * @var integer
+     */
+    private $type = self::INVALID;
+
+    /**
+     *
+     * @var array
+     */
     private $select = array();
 
-    private $from;
+    /**
+     *
+     * @var string
+     */
+    private $table;
 
+    /**
+     *
+     * @var array
+     */
     private $where = array(); /* key => value */
 
-    private $type;
+    /**
+     *
+     * @var array
+     */
+    private $columns = array();
+
+    /**
+     *
+     * @var array
+     */
+    private $rows = array();
 
     /**
      *
@@ -35,23 +71,35 @@ abstract class DBQueryBuilder {
                 throw new Exception();
             }
             $sql .= implode(',', $this->select);
-            if (!isset($this->from)) {
+            if (!isset($this->table)) {
                 throw new Exception();
             }
-            $sql .= ' FROM `' . $this->from . '`';
+            $sql .= ' FROM `' . $this->table . '`';
             // optional
             if (count($this->where) > 0) {
-                $sql .= ' WHERE 1 && ';
+                $sql .= ' WHERE 1 &&';
                 foreach ($this->where as $key => $val) {
-                    $sql .= sprintf(' `%s` = %s ', $key, $this->quote($val));
+                    $sql .= sprintf(' `%s` = %s', $key, $this->quote($val));
                 }
             }
         } else if ($this->type === self::UPDATE) {
-
         } else if ($this->type === self::DELETE) {
-
         } else if ($this->type === self::INSERT) {
-
+            $sql = 'INSERT';
+            if (!isset($this->table)) {
+                throw new Exception();
+            }
+            $sql .= ' INTO `' . $this->table . '`';
+            if (count($this->columns) <= 0) {
+                $this->columns = array_keys($this->rows[0]);
+            }
+            $this->columns = array_map('self::escape_column', $this->columns);
+            $sql .= ' (' . implode(',', $this->columns) . ')';
+            $value_rows = array();
+            foreach ($this->rows as $row) {
+                $value_rows[] = '(' . implode(',', array_map(array($this, 'quote'), $row)) . ')';
+            }
+            $sql .= ' VALUES ' . implode(', ', $value_rows);
         } else {
             throw new Exception();
         }
@@ -61,17 +109,31 @@ abstract class DBQueryBuilder {
 
     /**
      *
-     * @return void
+     * @param string $column
+     * @return string
      */
-    public function reset() {
-        $this->select = array();
-        unset($this->from);
-        $this->where = array();
-        unset($this->type);
+    private static function escape_column($column) {
+        return '`' . $column . '`';
     }
 
     /**
      *
+     * @throws Exception
+     * @return void
+     */
+    public function reset() {
+        $this->type = self::INVALID;
+        $this->select = array();
+        unset($this->table);
+        $this->where = array();
+        $this->columns = array();
+        $this->rows = array();
+    }
+
+    /**
+     * Primary
+     *
+     * @throws Exception
      * @return DB
      */
     public function select() {
@@ -94,6 +156,50 @@ abstract class DBQueryBuilder {
     }
 
     /**
+     * Primary
+     * @param string $table
+     * @param array $columns
+     * @return DB
+     */
+    public function insert($table, $columns = null) {
+        $this->reset();
+        if (!is_string($table)) {
+            throw new Exception();
+        }
+
+        $this->type = self::INSERT;
+        $this->table = $table;
+
+        if (isset($columns)) {
+            $this->columns = $columns;
+        }
+
+        return $this;
+    }
+
+    /**
+     *
+     * @param array $row
+     * @return DB
+     */
+    public function value($row) {
+        $this->rows[] = $row;
+
+        return $this;
+    }
+
+    /**
+     *
+     * @param array $rows
+     * @return DB
+     */
+    public function values($rows) {
+        $this->rows = array_merge($this->rows, $rows);
+
+        return $this;
+    }
+
+    /**
      *
      * @param string $table
      * @throws Exception
@@ -103,7 +209,7 @@ abstract class DBQueryBuilder {
         if (!is_string($table) || empty($table)) {
             throw new Exception();
         }
-        $this->from = $table;
+        $this->table = $table;
         return $this;
     }
 

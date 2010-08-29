@@ -5,14 +5,7 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-require_once 'DB.php';
-
 class DBTest extends PHPUnit_Framework_TestCase {
-
-    public function setUp() {
-        global $config;
-
-    }
 
     /**
      *
@@ -20,13 +13,7 @@ class DBTest extends PHPUnit_Framework_TestCase {
      */
     public function testGlobalTables($table, $name, $value) {
         $objDB = DB::getInstanceByTableAndShardKey($table);
-        $sql = 'INSERT INTO ' . $table . ' (name, value)
-        	VALUES
-        	( ' . $objDB->quote($name) . '
-        	, ' . $objDB->quote($value) . '
-        	)
-		';
-        $lastInsertedId = $objDB->query($sql)->lastInsertId();
+        $lastInsertedId= $objDB->insert($table)->value(array('name' => $name, 'value' => $value))->query()->lastInsertId();
         $sql = "DELETE FROM " . $table . "
         	WHERE id = " . $objDB->quote($lastInsertedId) . "
 		";
@@ -38,7 +25,7 @@ class DBTest extends PHPUnit_Framework_TestCase {
         $data[] = array(
             'settings',
             'asettingname',
-            'anysetingvalue',
+            'anysetingvalue'
         );
         return $data;
     }
@@ -48,15 +35,8 @@ class DBTest extends PHPUnit_Framework_TestCase {
      */
     public function testNewInsertAndSelect($uid, $data) {
         $objDB = DB::getInstanceByTableAndShardKey('user', $uid);
-        $sql = 'INSERT INTO `user`
-        	( `uid`
-        	, `data`
-        	) VALUE
-        	( ' . $objDB->quote($uid) . '
-        	, ' . $objDB->quote($data) . '
-        	)
-		';
-        $this->assertTrue($objDB->query($sql) instanceof DB);
+        $objDB = $objDB->insert('user', array('uid', 'data'))->value(array($uid, $data))->query();
+        $this->assertTrue($objDB instanceof DB);
         $sql = 'SELECT * FROM `user`
         	WHERE `uid` = ' . $objDB->quote($uid) . '
         	LIMIT 1
@@ -84,7 +64,5 @@ class DBTest extends PHPUnit_Framework_TestCase {
     public function testWarmUpIndexCacher() {
         $stats = DB::warmUpIndexCache(1);
         var_dump($stats);
-//        $stats = DB::warmUpIndexCache(2);
-//        var_dump($stats);
     }
 }

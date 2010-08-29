@@ -8,6 +8,8 @@
 define('DB_INCLUDE_PATH', realpath(dirname(__FILE__) . '/src'));
 set_include_path(DB_INCLUDE_PATH . ':' . get_include_path());
 
+require_once 'DB.php';
+
 $config = array(
     'core' => array(
         'charset' => 'utf8'
@@ -48,3 +50,5 @@ $config = array(
         )
     )
 );
+
+DB::setConfig($config);

@@ -22,6 +22,7 @@ class DB extends DBQueryBuilder {
     private static $config;
 
     /**
+     * Selected Link.
      *
      * @var mysqli
      */
@@ -268,16 +269,11 @@ class DB extends DBQueryBuilder {
                     $shard_id = (int)$row['shard_id'];
                 } else {
                     $shard_id = self::randAllocate($shards);
-                    $sql = 'INSERT INTO shard_index
-                        ( `shard_key`
-                        , `shard_id`
-                        ) VALUE
-                        ( ' . (int)$shard_key . '
-                        , ' . (int)$shard_id . '
-                        )
-                    ';
                     try {
-                        $objShardingMaster->query($sql);
+                        $objShardingMaster->insert('shard_index')->value(array(
+                            'shard_key' => $shard_key,
+                            'shard_id' => $shard_id
+                        ))->query();
                     } catch (Exception $e) {
                         throw new Exception('failed to insert index');
                     }
@@ -392,7 +388,6 @@ class DB extends DBQueryBuilder {
     }
 
     /**
-     * X-Connector
      *
      * @throws Exception
      * @return void
@@ -412,6 +407,7 @@ class DB extends DBQueryBuilder {
 
     /**
      *
+     * @throws Exception
      * @return mysqli
      */
     private function _xconnect() {

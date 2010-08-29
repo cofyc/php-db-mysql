@@ -3,12 +3,18 @@ A php mysql db client wrapper implementations for common use.
 Features
 ========
     - Vertical partitioning by table.
-    - Horizontal sharding by table & userid.
+    - Horizontal sharding by table & shard_key.
         Directory-based partitioning.
-        
+    - A simple query builder.
+        DML
+            SELECT ... FROM ... WHERE ...
+            INSERT ... INTO ... VALUES ...
+            UPDATE ... SET ... WHERE ...
+            DELETE FROM ... WHERE ...
+
 Dependencies
 ============
-    PHP: php 5.3.x+
+    PHP: php 5.3.x
     Extensions:
         mysqli
         memcached
