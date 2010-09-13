@@ -1,16 +1,18 @@
-A php mysql db client wrapper implementations for common use.
-
 Features
 ========
+  * DB
+    A php mysql db client wrapper implementation for common use.
     - Vertical partitioning by table.
     - Horizontal sharding by table & shard_key.
         Directory-based partitioning.
-    - A simple query builder.
+    - Query Builder:
         DML
             SELECT ... FROM ... WHERE ...
             INSERT ... INTO ... VALUES ...
             UPDATE ... SET ... WHERE ...
             DELETE FROM ... WHERE ...
+  * DBTable
+    A simple php db table wrapper with CURD operations supported and a cache layer built in.
 
 Dependencies
 ============

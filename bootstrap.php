@@ -9,6 +9,7 @@ define('DB_INCLUDE_PATH', realpath(dirname(__FILE__) . '/src'));
 set_include_path(DB_INCLUDE_PATH . ':' . get_include_path());
 
 require_once 'DB.php';
+require_once 'DBTable.php';
 
 $config = array(
     'core' => array(
