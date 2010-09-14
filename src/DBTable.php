@@ -16,9 +16,21 @@ class DBTable {
 
     /**
      *
+     * @var array
+     */
+    private $struct_schema;
+
+    /**
+     *
      * @var string
      */
     private $primary_key;
+
+    /**
+     *
+     * @var string
+     */
+    private $autoincrement_key;
 
     /**
      *
@@ -39,50 +51,47 @@ class DBTable {
      *
      * @var array
      */
-    private static $instances;
-
-    /**
-     *
-     * @var array
-     */
     private static $config;
 
     /**
      *
-     * @param array $config
-     * array
-     *   - table => string              // required
-     *   - primary_key => string        // required
+     * @param string $table
+     * @param array $struct_schema
+     * @throws Exception
      * @return DBTable
      */
-    private function __construct(array $config) {
+    public function __construct($table, array $struct_schema) {
         // table
-        if (!isset($config['table'])) {
-            throw new Exception('table is required');
-        }
-        $this->table = $config['table'];
+        $this->table = $table;
 
-        // primary_key
-        if (!isset($config['primary_key'])) {
-            throw new Exception('primary_key is required');
+        // parse table struct schema
+        $this->struct_schema = $struct_schema;
+
+        foreach ($struct_schema as $field => $schema) {
+            if (!isset($schema['type'])) {
+                throw new Exception('every field must have type');
+            }
+
+            if (isset($schema['primary'])) {
+                if (isset($this->primary_key)) {
+                    throw new Exception('only one primary key is supported');
+                }
+                $this->primary_key = $field;
+            }
+
+            if (isset($schema['autoincrement'])) {
+                if (isset($this->autoincrement_key)) {
+                    throw new Exception('only one autoincrement key is supported');
+                }
+                $this->autoincrement_key = $field;
+            }
         }
-        $this->primary_key = $config['primary_key'];
+        if (!isset($this->primary_key)) {
+            throw new Exception('table must have one primary key');
+        }
 
         // DB
         $this->db = DB::getInstanceByTableAndShardKey($this->table);
-    }
-
-    /**
-     *
-     * @param array $config
-     * @return DBTable
-     */
-    public static function getInstance(array $config) {
-        $args_key_string = serialize($config);
-        if (!isset(self::$instances[$args_key_string])) {
-            self::$instances[$args_key_string] = new self($config);
-        }
-        return self::$instances[$args_key_string];
     }
 
     /**
@@ -122,6 +131,7 @@ class DBTable {
             // E IO::db
 
             if ($entry) {
+                $entry = $this->type_cast($entry);
                 $this->entries[$pri_key] = $entry;
                 // S IO::cache
                 self::xmemcacher()->set($this->getCacheKey($pri_key), $entry);
@@ -167,7 +177,7 @@ class DBTable {
                 throw new Exception();
             }
             // E IO::cache
-        	$this->db->delete($this->table)->where(array(
+            $this->db->delete($this->table)->where(array(
                 $this->primary_key => $pri_key
             ))->query();
             return true;
@@ -209,5 +219,31 @@ class DBTable {
      */
     public static function setConfig(array $config) {
         self::$config = $config;
+    }
+
+    /**
+     *
+     * @param array
+     * @throws Exception
+     * @return array
+     */
+    private function type_cast(array $entry) {
+        $entry_casted = array();
+        foreach ($entry as $key => $val) {
+            foreach ($this->struct_schema as $field => $schema) {
+                if ($key === $field) {
+                    switch ($schema['type']) {
+                        case 'integer':
+                            $entry_casted[$key] = (int)$val;
+                            break;
+                        case 'string':
+                            $entry_casted[$key] = $val;
+                        default:
+                            break;
+                    }
+                }
+            }
+        }
+        return $entry_casted;
     }
 }

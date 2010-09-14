@@ -14,9 +14,18 @@ class DBTableTest extends PHPUnit_Framework_TestCase {
     private $objDBTable;
 
     public function __construct() {
-        $this->objDBTable = DBTable::getInstance(array(
-            'table' => 'settings',
-            'primary_key' => 'id',
+        $this->objDBTable = new DBTable('settings', array(
+            'id' => array(
+                'type' => 'integer',
+                'primary' => true,
+                'auto_increment' => true,
+            ),
+            'name' => array(
+                'type' => 'string',
+            ),
+            'value' => array(
+                'type' => 'string',
+            ),
         ));
     }
 
