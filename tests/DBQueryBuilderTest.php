@@ -13,21 +13,36 @@ class DBQueryBuilderTest extends PHPUnit_Framework_TestCase {
      */
     private $objDB;
 
-    public function setUp() {
-        $this->objDB = DB::getInstanceByShardClusterIDAndShardID(1, 1);
+    public function __construct() {
+        parent::__construct();
+        $this->objDB = DB::getInstanceByTableAndShardKey('settings');
     }
-
-    public function tearDown() {}
 
     public function test() {
-        // DML::SELECT
-        $this->objDB->select()->from('user')->where('uid', 1234)->query();
-        $this->objDB->select()->from('user')->where(array(
-            'uid' => 1234
-        ))->query();
-        $this->objDB->select('uid')->from('user')->where(array(
-            'uid' => 1234
-        ))->query();
+        $setting = array(
+            'name' => sha1(mt_rand()),
+            'value' => sha1(mt_rand()),
+        );
+
         // DML::INSERT
+        $settingid = $this->objDB->insert('settings')->value($setting)->query()->lastInsertId();
+        $this->assertTrue($settingid > 0);
+        $setting['id'] = $settingid;
+
+        // DML::SELECT
+        $this->assertEquals($setting, $this->objDB->select()->from('settings')->where('name', $setting['name'])->query()->fetch());
+        $this->assertEquals($setting, $this->objDB->select()->from('settings')->where(array('name' => $setting['name'], 'value' => $setting['value']))->query()->fetch());
+
+        // DML::UPDATE
+        $updatedname = sha1(mt_rand());
+        $this->objDB->update('settings')->set('name', $updatedname)->where('name', $setting['name'])->query();
+        $setting['name'] = $updatedname;
+        $this->assertEquals($setting, $this->objDB->select()->from('settings')->where('name', $setting['name'])->query()->fetch());
+        $this->assertEquals($setting, $this->objDB->select()->from('settings')->where(array('name' => $setting['name'], 'value' => $setting['value']))->query()->fetch());
+
+        // DML::DELETE
+        $this->objDB->delete('settings')->where('name', $setting['name'])->where('value', $setting['value'])->query();
+        $this->assertNull($this->objDB->select()->from('settings')->where('name', $setting['name'])->query()->fetch());
     }
+
 }

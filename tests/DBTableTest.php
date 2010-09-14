@@ -8,19 +8,41 @@
 class DBTableTest extends PHPUnit_Framework_TestCase {
 
     /**
+     *
+     * @var DBTable
      */
-    public function test() {
-        $objSettingsTable = DBTable::getInstance(array(
+    private $objDBTable;
+
+    public function __construct() {
+        $this->objDBTable = DBTable::getInstance(array(
             'table' => 'settings',
             'primary_key' => 'id',
         ));
+    }
+
+    public function test() {
         $setting = array('name' => sha1(mt_rand()), 'value' => sha1(mt_rand()));
-        $pri_key = $objSettingsTable->create($setting);
+
+        // CREATE
+        $pri_key = $this->objDBTable->create($setting);
         $setting['id'] = $pri_key;
 
-        $this->assertEquals($setting, $objSettingsTable->read($pri_key));
+        // READ
+        $this->assertEquals($setting, $this->objDBTable->read($pri_key));
 
-        $this->assertType('array', $objSettingsTable->read($pri_key - 1));
-        $this->assertFalse($objSettingsTable->read($pri_key + 1));
+        // UPDATE
+        $setting['name'] = sha1(mt_rand());
+        $this->objDBTable->update($pri_key, $setting);
+        $this->assertEquals($setting, $this->objDBTable->read($pri_key));
+
+        // DELETE
+        $this->objDBTable->delete($pri_key);
+        $this->assertEquals(false, $this->objDBTable->read($pri_key));
+
+        // PROFILE::PERFORMANCE
+        for ($i = 0; $i < 1000; $i++) {
+            $this->objDBTable->read($pri_key);
+        }
     }
+
 }

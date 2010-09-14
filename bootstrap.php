@@ -1,12 +1,11 @@
 <?php
 /**
- * Bootstrap file for Unit Testing.
  *
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-define('DB_INCLUDE_PATH', realpath(dirname(__FILE__) . '/src'));
-set_include_path(DB_INCLUDE_PATH . ':' . get_include_path());
+define('DB_SRC_PATH', realpath(dirname(__FILE__) . '/src'));
+set_include_path(DB_SRC_PATH . ':' . get_include_path());
 
 require_once 'DB.php';
 require_once 'DBTable.php';

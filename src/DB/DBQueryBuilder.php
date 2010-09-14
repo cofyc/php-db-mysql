@@ -13,21 +13,21 @@
 
 abstract class DBQueryBuilder {
 
-    const INVALID = -1;
+    const TYPE_INVALID = -1;
 
-    const SELECT = 0;
+    const TYPE_SELECT = 0;
 
-    const UPDATE = 1;
+    const TYPE_UPDATE = 1;
 
-    const DELETE = 2;
+    const TYPE_DELETE = 2;
 
-    const INSERT = 3;
+    const TYPE_INSERT = 3;
 
     /**
      *
      * @var integer
      */
-    private $type = self::INVALID;
+    private $type = self::TYPE_INVALID;
 
     /**
      *
@@ -45,7 +45,7 @@ abstract class DBQueryBuilder {
      *
      * @var array
      */
-    private $where = array(); /* key => value */
+    private $where = array();
 
     /**
      *
@@ -61,11 +61,17 @@ abstract class DBQueryBuilder {
 
     /**
      *
+     * @var array
+     */
+    private $set = array();
+
+    /**
+     *
      * @throws Exception
-     * @return string, false on failure
+     * @return string
      */
     public function builder() {
-        if ($this->type === self::SELECT) {
+        if ($this->type === self::TYPE_SELECT) {
             $sql = 'SELECT ';
             if (count($this->select) <= 0) {
                 throw new Exception();
@@ -75,16 +81,31 @@ abstract class DBQueryBuilder {
                 throw new Exception();
             }
             $sql .= ' FROM `' . $this->table . '`';
-            // optional
-            if (count($this->where) > 0) {
-                $sql .= ' WHERE 1 &&';
-                foreach ($this->where as $key => $val) {
-                    $sql .= sprintf(' `%s` = %s', $key, $this->quote($val));
-                }
+            $sql .= $this->builder_where_expr();
+        } else if ($this->type === self::TYPE_UPDATE) {
+            $sql = 'UPDATE ';
+            if (!isset($this->table)) {
+                throw new Exception();
             }
-        } else if ($this->type === self::UPDATE) {
-        } else if ($this->type === self::DELETE) {
-        } else if ($this->type === self::INSERT) {
+            $sql .= '`' . $this->table . '`';
+            if (count($this->set) <= 0) {
+                throw new Exception('UPDATE:: no data to set');
+            }
+
+            $set_arr = array();
+            foreach ($this->set as $key => $val) {
+                $set_arr[] = sprintf('%s = %s', $this->escape_column($key), $this->quote($val));
+            }
+            $sql .= ' SET ' . implode(',', $set_arr);
+            $sql .= $this->builder_where_expr();
+        } else if ($this->type === self::TYPE_DELETE) {
+            $sql = 'DELETE FROM';
+            if (!isset($this->table)) {
+                throw new Exception();
+            }
+            $sql .= '`' . $this->table . '`';
+            $sql .= $this->builder_where_expr();
+        } else if ($this->type === self::TYPE_INSERT) {
             $sql = 'INSERT';
             if (!isset($this->table)) {
                 throw new Exception();
@@ -109,6 +130,23 @@ abstract class DBQueryBuilder {
 
     /**
      *
+     * @return string
+     */
+    private function builder_where_expr() {
+        $where_expr = '';
+        if (!empty($this->where)) {
+            $where_expr .= ' WHERE ';
+            $expr_strs = array();
+            foreach ($this->where as $key => $val) {
+                $expr_strs[] .= sprintf('%s = %s', $this->escape_column($key), $this->quote($val));
+            }
+            $where_expr .= implode(' && ', $expr_strs);
+        }
+        return $where_expr;
+    }
+
+    /**
+     *
      * @param string $column
      * @return string
      */
@@ -121,24 +159,25 @@ abstract class DBQueryBuilder {
      * @throws Exception
      * @return void
      */
-    public function reset() {
-        $this->type = self::INVALID;
+    private function reset() {
+        $this->type = self::TYPE_INVALID;
         $this->select = array();
         unset($this->table);
         $this->where = array();
         $this->columns = array();
         $this->rows = array();
+        $this->set = array();
     }
 
     /**
-     * Primary
+     * SELECT Primary
      *
      * @throws Exception
      * @return DB
      */
     public function select() {
         $this->reset();
-        $this->type = self::SELECT;
+        $this->type = self::TYPE_SELECT;
         if (func_num_args() > 0) {
             $args = func_get_args();
             foreach ($args as $arg) {
@@ -156,7 +195,7 @@ abstract class DBQueryBuilder {
     }
 
     /**
-     * Primary
+     * INSERT Primary
      * @param string $table
      * @param array $columns
      * @return DB
@@ -167,11 +206,70 @@ abstract class DBQueryBuilder {
             throw new Exception();
         }
 
-        $this->type = self::INSERT;
+        $this->type = self::TYPE_INSERT;
         $this->table = $table;
 
         if (isset($columns)) {
             $this->columns = $columns;
+        }
+
+        return $this;
+    }
+
+    /**
+     * UPDATE Primary
+     *
+     * @param string $table
+     * @return DB
+     */
+    public function update($table) {
+        $this->reset();
+        if (!is_string($table)) {
+            throw new Exception();
+        }
+
+        $this->type = self::TYPE_UPDATE;
+        $this->table = $table;
+
+        return $this;
+    }
+
+    /**
+     * DELETE Primary
+     *
+     * @param string $table
+     * @return DB
+     */
+    public function delete($table) {
+        $this->reset();
+        if (!is_string($table)) {
+            throw new Exception();
+        }
+
+        $this->type = self::TYPE_DELETE;
+        $this->table = $table;
+
+        return $this;
+    }
+
+    /**
+     *
+     * DBQueryBuilder::set('column', 'value');
+     * DBQueryBuilder::set(array(
+     *  'column1' => 'value1',
+     *  'column2' => 'value2',
+     *  // ...
+     * ));
+     * @return DB
+     */
+    public function set() {
+        $args = func_get_args();
+        if (func_num_args() === 2) {
+            $this->set[$args[0]] = $args[1];
+        } else if (func_num_args() === 1 && is_array($args[0])) {
+            $this->set = array_merge($this->set, $args[0]);
+        } else {
+            throw new Exception();
         }
 
         return $this;

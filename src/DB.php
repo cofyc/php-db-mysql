@@ -521,7 +521,7 @@ class DB extends DBQueryBuilder {
     /**
      *
      * @throws Exception
-     * @return array, false on failure
+     * @return array, null if there are no more rows in resultset.
      */
     public function fetch() {
         if ($this->result instanceof mysqli_result) {

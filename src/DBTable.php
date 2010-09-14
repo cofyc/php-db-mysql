@@ -117,8 +117,15 @@ class DBTable {
      * @return boolean, false on failure
      */
     public function update($pri_key, array $entry) {
-        // TODO update it in db
-        $this->entries[$pri_key] = $entry;
+        try {
+            $this->db->update($this->table)->set($entry)->where(array(
+                $this->primary_key => $pri_key
+            ))->query();
+            $this->entries[$pri_key] = $entry;
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
     }
 
     /**
@@ -127,9 +134,16 @@ class DBTable {
      * @return boolean, false on failure
      */
     public function delete($pri_key) {
-        if (isset($this->entries[$pri_key])) {
-            unset($this->entries[$pri_key]);
+        try {
+        	$this->db->delete($this->table)->where(array(
+                $this->primary_key => $pri_key
+            ))->query();
+            if (isset($this->entries[$pri_key])) {
+                unset($this->entries[$pri_key]);
+            }
+            return true;
+        } catch (Exception $e) {
+            return false;
         }
-        // TODO delete it in db
     }
 }
