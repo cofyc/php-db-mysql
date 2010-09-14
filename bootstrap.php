@@ -52,3 +52,11 @@ $config = array(
 );
 
 DB::setConfig($config);
+DBTable::setConfig(array(
+    'memcaches' => array(
+        array(
+            '127.0.0.1',
+            11211
+        ),
+    ),
+));
