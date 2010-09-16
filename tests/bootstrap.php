@@ -4,13 +4,13 @@
  * @author Yecheng Fu <cofyc.jackson@gmail.com>
  */
 
-define('DB_SRC_PATH', realpath(dirname(__FILE__) . '/src'));
+define('DB_SRC_PATH', realpath(dirname(__FILE__) . '/../src'));
 set_include_path(DB_SRC_PATH . ':' . get_include_path());
 
 require_once 'DB.php';
 require_once 'DBTable.php';
 
-$config = array(
+DB::setConfig(array(
     'core' => array(
         'charset' => 'utf8'
     ),
@@ -49,14 +49,13 @@ $config = array(
             )
         )
     )
-);
+));
 
-DB::setConfig($config);
 DBTable::setConfig(array(
     'memcaches' => array(
         array(
             '127.0.0.1',
             11211
-        ),
-    ),
+        )
+    )
 ));
