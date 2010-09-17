@@ -18,7 +18,7 @@ class DBTableTest extends PHPUnit_Framework_TestCase {
             'id' => array(
                 'type' => 'integer',
                 'primary' => true,
-                'auto_increment' => true,
+                'autoincrement' => true,
             ),
             'name' => array(
                 'type' => 'string',
