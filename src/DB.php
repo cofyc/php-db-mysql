@@ -319,6 +319,7 @@ class DB extends DBQueryBuilder {
     /**
      * Index Cache Warm-Up
      *
+     * @param integer $cluster_id_specified
      * @throws Exception
      * @return array
      * - total: integer
@@ -326,7 +327,7 @@ class DB extends DBQueryBuilder {
      * - failed: integer
      * - locked: integer
      */
-    public static function warmUpIndexCache() {
+    public static function warmUpIndexCache($cluster_id_specified = null) {
         $stats = array();
 
         $masters = self::getConfig('sharding.masters');
@@ -337,6 +338,12 @@ class DB extends DBQueryBuilder {
         self::xShardingIndexCacher();
 
         foreach ($masters as $cluster_id => $dsn) {
+            if (isset($cluster_id_specified)) {
+                if ($cluster_id_specified != $cluster_id) {
+                    continue;
+                }
+            }
+
             $_stats = array(
                 'total' => 0,
                 'cached' => 0,

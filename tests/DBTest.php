@@ -15,8 +15,8 @@ class DBTest extends PHPUnit_Framework_TestCase {
         $objDB = DB::getInstanceByTableAndShardKey($table);
         $lastInsertedId= $objDB->insert($table)->value(array('name' => $name, 'value' => $value))->query()->lastInsertId();
         $sql = "DELETE FROM " . $table . "
-        	WHERE id = " . $objDB->quote($lastInsertedId) . "
-		";
+            WHERE id = " . $objDB->quote($lastInsertedId) . "
+        ";
         $objDB->query($sql);
     }
 
@@ -38,8 +38,8 @@ class DBTest extends PHPUnit_Framework_TestCase {
         $objDB = $objDB->insert('user', array('uid', 'data'))->value(array($uid, $data))->query();
         $this->assertTrue($objDB instanceof DB);
         $sql = 'SELECT * FROM `user`
-        	WHERE `uid` = ' . $objDB->quote($uid) . '
-        	LIMIT 1
+            WHERE `uid` = ' . $objDB->quote($uid) . '
+            LIMIT 1
         ';
         $db = $objDB->query($sql);
         $this->assertTrue($db instanceof DB);
@@ -62,7 +62,7 @@ class DBTest extends PHPUnit_Framework_TestCase {
     }
 
     public function testWarmUpIndexCacher() {
-        $stats = DB::warmUpIndexCache(1);
-        var_dump($stats);
+        var_dump(DB::warmUpIndexCache());
+        var_dump(DB::warmUpIndexCache(1));
     }
 }
